@@ -1,0 +1,5 @@
+node_modules/
+dist/
+public/eng.traineddata.gz
+playwright-report/
+test-results/
