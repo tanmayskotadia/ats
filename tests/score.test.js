@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseResume } from '../src/resume.js';
 import { compareKeywords, scoreResume } from '../src/score.js';
-import { sampleText, sampleJob } from '../src/sample.js';
+import { sampleText, sampleJob } from './fixtures/resume.js';
 
 test('extracts contact details, sections, skills, dates, and measurable statements', () => {
   const resume = parseResume(sampleText);

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { strToU8, zipSync } from 'fflate';
-import { sampleJob, sampleText } from '../src/sample.js';
+import { sampleJob, sampleText } from './fixtures/resume.js';
 
 const pdfText = ['Avery Morgan', 'Data Analyst', 'avery.morgan@example.com', 'Experience', 'Built 12 dashboards for operations teams.', 'Skills', 'SQL, Tableau, Excel'];
 
@@ -32,18 +32,20 @@ async function analyze(page, name, mimeType, buffer) {
   await page.getByRole('tab', { name: 'Parsed resume' }).click();
 }
 
-test('demo, keyboard tabs, scoring dialog, and report download', async ({ page }) => {
+test('upload, keyboard tabs, scoring dialog, and report download', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'How scoring works' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'View sample report' }).click();
+  await expect(page.getByText('Example report')).toHaveCount(0);
+  await page.locator('#file').setInputFiles({ name: 'uploaded.txt', mimeType: 'text/plain', buffer: Buffer.from(sampleText) });
+  await page.getByRole('button', { name: 'Analyze resume' }).click();
   await expect(page.getByRole('heading', { name: 'What to improve' })).toBeVisible();
   await page.getByRole('tab', { name: 'Overview' }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('heading', { name: 'Extracted text' })).toBeVisible();
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('heading', { name: /Missing keywords/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Job keyword match' })).toBeVisible();
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download report' }).click();
   const download = await downloadPromise;
@@ -57,15 +59,15 @@ test('TXT upload, job comparison, safe text rendering, and reset', async ({ page
   await expect(page.getByRole('alert')).toHaveText('Choose a resume to analyze.');
   await page.locator('#file').setInputFiles({ name: 'resume.exe', mimeType: 'application/octet-stream', buffer: Buffer.from('invalid') });
   await expect(page.getByRole('alert')).toContainText('Choose a PDF');
-  await page.getByText('Job description', { exact: false }).filter({ hasText: 'Optional' }).last().click();
+  await page.locator('#job-panel summary').click();
   await page.getByRole('textbox', { name: 'Job description' }).fill(sampleJob);
   await analyze(page, 'sample.txt', 'text/plain', Buffer.from(sampleText + '\n<img src=x onerror=alert(1)>'));
   await expect(page.locator('pre')).toContainText('<img src=x onerror=alert(1)>');
   await expect(page.locator('#report img')).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Keywords' }).click();
+  await page.getByRole('tab', { name: 'Job match' }).click();
   await expect(page.getByText('Power BI', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New scan' }).click();
-  await expect(page.getByRole('button', { name: 'Choose a file' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choose files' })).toBeVisible();
 });
 
 test('extracts selectable PDF text', async ({ page }) => {
@@ -124,4 +126,65 @@ test('recognizes an image at mobile width', async ({ page }) => {
   await expect(page.locator('pre')).toContainText('Avery Morgan');
   const fits = await page.evaluate(() => document.documentElement.scrollWidth === window.innerWidth);
   expect(fits).toBe(true);
+});
+
+test('keeps completed reports when another file in the batch fails', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#file').setInputFiles([
+    { name: 'valid.txt', mimeType: 'text/plain', buffer: Buffer.from(sampleText) },
+    { name: 'damaged.docx', mimeType: 'application/zip', buffer: Buffer.from('bad zip') },
+  ]);
+  await page.getByRole('button', { name: 'Analyze 2 resumes' }).click();
+  await expect(page.getByText('2 of 2 finished')).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export batch summary' }).click();
+  expect((await download).suggestedFilename()).toBe('shortlist-batch.csv');
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open report' }).click();
+  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to batch' }).click();
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByText('1 of 1 finished')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open report' })).toBeVisible();
+});
+
+test('AI scans are opt-in and show structured entries, job evidence, and improvements', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: { aiEnabled: true } }));
+  let request;
+  await page.route('**/api/analyze', async route => {
+    request = route.request().postDataJSON();
+    await route.fulfill({ json: {
+      entries: [{ kind: 'experience', title: 'Data Analyst', organization: 'Northwind Logistics', dates: 'May 2023 - Present', evidence: ['Data Analyst | Northwind Logistics', 'May 2023 - Present'] }],
+      skills: [{ label: 'Tableau', evidence: 'Built Tableau dashboards' }],
+      requirements: [{ label: 'Data visualization', preferred: false, jobEvidence: 'Data visualization', evidence: 'Built Tableau dashboards' }],
+      improvements: [{ title: 'Clarify dashboard outcomes', action: 'Explain how the dashboard informed a decision if you can verify the result.', evidence: 'Built Tableau dashboards' }],
+    } });
+  });
+  await page.goto('/');
+  const toggle = page.getByRole('checkbox', { name: 'AI-assisted parsing' });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await page.locator('#job-panel summary').click();
+  await page.getByRole('textbox', { name: 'Job description' }).fill(sampleJob);
+  await page.locator('#file').setInputFiles({ name: 'uploaded.txt', mimeType: 'text/plain', buffer: Buffer.from(sampleText) });
+  await page.getByRole('button', { name: 'Analyze resume' }).click();
+  await expect(page.getByRole('heading', { name: 'AI editing suggestions' })).toBeVisible();
+  expect(request.resume).toContain('[email removed]');
+  expect(request.resume).not.toContain('555-0142');
+  await page.getByRole('tab', { name: 'Parsed resume' }).click();
+  await expect(page.getByRole('heading', { name: 'Skills with evidence' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Job match' }).click();
+  await expect(page.getByRole('heading', { name: /Supported requirements/ })).toBeVisible();
+  await expect(page.getByText('Built Tableau dashboards', { exact: false })).toBeVisible();
+});
+
+test('explains when AI fails and uses the local rubric', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: { aiEnabled: true } }));
+  await page.route('**/api/analyze', route => route.fulfill({ status: 429, json: { error: 'AI scan limit reached.' } }));
+  await page.goto('/');
+  await page.getByRole('checkbox', { name: 'AI-assisted parsing' }).check();
+  await analyze(page, 'uploaded.txt', 'text/plain', Buffer.from(sampleText));
+  await expect(page.getByText('AI scan limit reached. This report uses the local parser.')).toBeVisible();
+  await expect(page.locator('pre')).toContainText('Avery Morgan');
 });

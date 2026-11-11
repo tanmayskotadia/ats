@@ -161,3 +161,9 @@ export function parseResume(text, metadata = {}) {
     metadata,
   };
 }
+
+export function redactContact(text, contact) {
+  let redacted = text.replace(emailPattern, '[email removed]');
+  for (const phone of contact.phone) redacted = redacted.replaceAll(phone, '[phone removed]');
+  return redacted;
+}

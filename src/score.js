@@ -68,16 +68,20 @@ export function compareKeywords(resume, job) {
     const evidence = resumeLines.find(line => term.aliases.some(alias => termMatches(line, alias)));
     return { label: term.label, preferred: preferredOnly, evidence: evidence || '' };
   }).sort((first, second) => Number(first.preferred) - Number(second.preferred) || first.label.localeCompare(second.label));
-  const matched = sortedTerms.filter(term => term.evidence);
-  const missing = sortedTerms.filter(term => !term.evidence);
-  const weight = list => list.reduce((total, term) => total + (term.preferred ? 1 : 2), 0);
-  return { provided: true, matched, missing, total: terms.length, ratio: terms.length ? weight(matched) / weight(sortedTerms) : 0 };
+  return summarizeMatches(sortedTerms);
 }
 
-export function scoreResume(resume, job = '') {
+function summarizeMatches(terms) {
+  const matched = terms.filter(term => term.evidence);
+  const missing = terms.filter(term => !term.evidence);
+  const weight = list => list.reduce((total, term) => total + (term.preferred ? 1 : 2), 0);
+  return { provided: true, matched, missing, total: terms.length, ratio: terms.length ? weight(matched) / weight(terms) : 0 };
+}
+
+export function scoreResume(resume, job = '', requirements = []) {
   const { contact, experienceDates, sections, statements, actionStatements, quantifiedStatements, skills, wordCount, metadata } = resume;
   const has = key => sections.some(section => section.key === key && section.lines.length > 0);
-  const keywords = compareKeywords(resume, job);
+  const keywords = requirements.length ? { ...summarizeMatches(requirements), semantic: true } : compareKeywords(resume, job);
   const check = (id, title, points, max, advice, evidence = '') => ({ id, title, points, max, advice, evidence });
   const categories = [
     { id: 'readability', title: 'ATS readability', icon: 'scan-line', checks: [
@@ -109,9 +113,10 @@ export function scoreResume(resume, job = '') {
         `${actionStatements.length} of ${statements.length} statements start with an action verb`),
     ] },
   ];
-  categories.push(keywords.total ? { id: 'keywords', title: 'Job keyword match', icon: 'target', checks: [
-    check('role-match', 'Role keyword coverage', Math.round(25 * keywords.ratio), 25,
-      'Add missing job keywords where they describe your actual experience. Use the Keywords tab to review the matches.',
+  categories.push(keywords.total ? { id: 'keywords', title: keywords.semantic ? 'Job requirement match' : 'Job keyword match', icon: 'target', checks: [
+    check('role-match', keywords.semantic ? 'Job requirement coverage' : 'Role keyword coverage', Math.round(25 * keywords.ratio), 25,
+      keywords.semantic ? 'Use the Job match tab to identify requirements you can support with clearer evidence.' :
+        'Add missing job keywords where they describe your actual experience. Review matches in the Job match tab.',
       `${keywords.matched.length} of ${keywords.total} detected terms found`),
   ] } : { id: 'content', title: 'Content coverage', icon: 'target', checks: [
     check('skill-detail', 'Specific skills', Math.min(10, skills.length * 2), 10,

@@ -9,7 +9,8 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:4173',
   },
   webServer: {
-    command: 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
+    command: 'npm start',
+    env: { PORT: '4173', HOST: '127.0.0.1', OPENAI_API_KEY: '', REDIS_URL: '' },
     url: 'http://127.0.0.1:4173',
   },
 });

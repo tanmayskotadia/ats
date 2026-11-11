@@ -33,7 +33,7 @@ h2 { font-size: 20px; font-weight: 800; letter-spacing: -.55px; }
 .brand-icon svg { width: 20px; height: 20px; }
 .brand-dot { color: var(--violet); margin-left: -9px; }
 .quiet { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 650; background: transparent; border: 0; padding: 8px 0; }
-.quiet:hover, .preview-link:hover, .browse:hover { color: var(--violet-dark); text-decoration: underline; text-underline-offset: 4px; }
+.quiet:hover, .browse:hover { color: var(--violet-dark); text-decoration: underline; text-underline-offset: 4px; }
 .quiet svg { width: 16px; height: 16px; }
 
 .hero, .report-banner {
@@ -63,9 +63,9 @@ h2 { font-size: 20px; font-weight: 800; letter-spacing: -.55px; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1.32fr) minmax(0, 1fr); gap: 22px; align-items: start; margin-top: 22px; }
 .card { background: #fff; border: 1px solid var(--line); border-radius: 19px; box-shadow: 0 2px 5px #25174105; }
-.scanner-card, .preview-card { padding: 23px; }
+.scanner-card, .workflow-card { padding: 23px; }
 .card-heading { display: flex; align-items: center; gap: 13px; margin-bottom: 19px; }
-.card-heading p, .preview-score p { color: var(--muted); font-size: 13px; margin-top: 3px; line-height: 1.55; }
+.card-heading p { color: var(--muted); font-size: 13px; margin-top: 3px; line-height: 1.55; }
 .tile { width: 43px; height: 43px; border-radius: 12px; display: inline-grid; place-items: center; background: var(--soft); color: var(--violet); flex: 0 0 auto; }
 .drop { border: 1px dashed #bfb2e9; border-radius: 13px; background: #faf8ff; min-height: 143px; padding: 18px 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 14px; transition: background .15s, border-color .15s; text-align: center; }
 .drop.dragging { background: #efe6ff; border-color: var(--violet); }
@@ -73,7 +73,7 @@ h2 { font-size: 20px; font-weight: 800; letter-spacing: -.55px; }
 .drop-icon svg { width: 18px; height: 18px; }
 .browse { color: var(--violet); font-weight: 750; border: 0; padding: 3px 0; background: transparent; }
 .drop-note { color: var(--muted); font-size: 11px; line-height: 1.4; }
-.selected { display: flex; gap: 10px; align-items: center; width: min(100%, 420px); padding: 12px; background: #fff; border: 1px solid #e9e1fb; border-radius: 11px; text-align: left; }
+.selected { display: flex; gap: 10px; align-items: center; width: 100%; padding: 10px; background: #fff; border: 1px solid #e9e1fb; border-radius: 11px; text-align: left; }
 .selected > svg { color: var(--violet); }
 .selected > span { flex: 1; min-width: 0; }
 .selected b { font-size: 13px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -81,7 +81,6 @@ h2 { font-size: 20px; font-weight: 800; letter-spacing: -.55px; }
 .icon-button { border: 0; border-radius: 8px; width: 31px; height: 31px; display: grid; place-items: center; background: transparent; color: var(--muted); flex: 0 0 auto; }
 .icon-button:hover { color: var(--violet); background: var(--soft); }
 .icon-button svg { width: 17px; height: 17px; }
-.has-file .drop-icon, .has-file #drop-label, .has-file .drop-note { display: none; }
 .job { border: 1px solid var(--line); border-radius: 11px; margin: 12px 0; }
 summary { cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }
@@ -107,17 +106,10 @@ details[open] > summary > svg { transform: rotate(180deg); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .alert { background: #fff1f0; border: 1px solid #f5d8d7; padding: 10px 12px; margin: 0 0 12px; border-radius: 9px; font-size: 13px; color: #9d292a; }
 
-.preview-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.preview-heading > span { color: #6345b6; font-size: 11px; font-weight: 700; background: #f0ebff; padding: 5px 9px; border-radius: 20px; }
-.preview-score { display: flex; align-items: center; gap: 15px; margin: 17px 0 16px; }
-.preview-score h3 { font-size: 17px; }
 .ring { --ring-color: #b9a0ff; --ring-track: #ffffff26; --ring-inner: #3b2561; width: 123px; aspect-ratio: 1; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: conic-gradient(var(--ring-color) var(--score), var(--ring-track) 0); padding: 8px; }
 .ring > div { display: flex; align-items: baseline; justify-content: center; gap: 3px; align-content: center; flex-wrap: wrap; border-radius: 50%; width: 100%; height: 100%; background: var(--ring-inner); }
 .ring strong { font-family: var(--heading); font-size: 43px; font-weight: 850; letter-spacing: -2px; line-height: 1; }
 .ring span { color: #e0d5f2; font-size: 11px; font-weight: 650; }
-.ring-small { --ring-color: #7858e7; --ring-track: #eee8fa; --ring-inner: #fff; width: 77px; padding: 5px; }
-.ring-small strong { font-size: 27px; letter-spacing: -1px; }
-.ring-small span { color: var(--muted); font-size: 9px; }
 .metric-list { display: grid; gap: 9px; }
 .metric { --metric: #7453db; --metric-bg: #f1ebff; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px; }
 .metric.blue { --metric: #3b75c8; --metric-bg: #eaf2ff; }
@@ -130,8 +122,6 @@ details[open] > summary > svg { transform: rotate(180deg); }
 .metric-label b span { color: var(--muted); font-weight: 550; }
 .track { height: 4px; background: #f0edf5; border-radius: 10px; overflow: hidden; }
 .track i { display: block; height: 100%; background: var(--metric); border-radius: inherit; }
-.preview-link { width: 100%; display: flex; align-items: center; justify-content: space-between; border: 0; border-top: 1px solid var(--line); margin-top: 16px; padding: 13px 0 0; background: transparent; color: var(--violet); font-size: 13px; font-weight: 750; }
-.preview-link svg { width: 16px; height: 16px; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); margin-top: 24px; border-top: 1px solid var(--line); padding-block: 15px 21px; font-size: 11px; }
 .footer svg { width: 14px; height: 14px; margin-left: 3px; color: var(--violet); }
 
@@ -194,7 +184,7 @@ dialog dd { margin: 0; font-weight: 700; white-space: nowrap; }
   .shell { width: calc(100% - 44px); }
   .hero { min-height: 255px; padding-inline: 30px; }
   .workspace { gap: 14px; }
-  .scanner-card, .preview-card, .report-card { padding: 17px; }
+  .scanner-card, .workflow-card, .report-card { padding: 17px; }
 }
 @media (max-width: 640px) {
   .shell { width: calc(100% - 30px); }
@@ -216,3 +206,26 @@ dialog dd { margin: 0; font-weight: 700; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+.workflow-list { display: grid; list-style: none; padding: 0; margin: 17px 0 0; gap: 16px; }
+.workflow-list li { display: flex; gap: 11px; align-items: flex-start; }
+.workflow-list .tile { width: 34px; height: 34px; border-radius: 9px; }
+.workflow-list .tile svg { width: 17px; height: 17px; }
+.workflow-list h3 { font-size: 14px; font-weight: 800; }
+.workflow-list p { color: var(--muted); font-size: 13px; line-height: 1.55; margin-top: 2px; }
+.queue { display: grid; gap: 6px; padding: 0; margin: 10px 0 0; list-style: none; }
+.selected small { overflow-wrap: anywhere; }
+.selected .secondary { padding: 7px 8px; font-size: 11px; white-space: nowrap; }
+.ai-setting { display: flex; align-items: flex-start; gap: 9px; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; }
+.ai-setting input { accent-color: var(--violet); margin: 2px 0 0; width: 16px; height: 16px; flex: 0 0 auto; }
+.ai-setting strong, .ai-setting small { display: block; line-height: 1.5; }
+.ai-setting strong { font-size: 13px; }
+.ai-setting strong svg { width: 14px; height: 14px; color: var(--violet); }
+.ai-setting small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.ai-improvements { margin-top: 16px; }
+.ai-entries { margin: 0; padding: 0; list-style: none; }
+.ai-entries li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.ai-entries summary { margin-top: 4px; color: var(--violet-dark); font-size: 12px; font-weight: 650; }
+.ai-entries summary svg { width: 13px; height: 13px; }
+.ai-entries blockquote, .ai-improvements blockquote { border-left: 2px solid #b9a0ff; padding-left: 9px; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.batch-export { margin-top: 9px; }
