@@ -1,6 +1,8 @@
 node_modules/
 dist/
 public/eng.traineddata.gz
+public/ml-runtime/
+public/models/
 playwright-report/
 test-results/
 .env

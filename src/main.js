@@ -46,7 +46,7 @@ document.querySelector('#app').innerHTML = `
       <div class="hero-content">
         <div class="hero-label">${icon('scan-line')} ATS RESUME CHECKER</div>
         <h1>See how your resume<br class="desktop-break"> reads to an ATS.</h1>
-        <p>Get a score out of 100, see exactly what was extracted, and find the edits that matter most.</p>
+        <p>Read your complete profile, compare the evidence with a job, and get a clear improvement plan out of 100.</p>
       </div>
     </section>
     <div class="workspace">
@@ -66,6 +66,10 @@ document.querySelector('#app').innerHTML = `
             <label class="sr-only" for="job">Job description</label>
             <textarea id="job" rows="5" maxlength="30000" placeholder="Paste the job description to check which skills and keywords your resume covers."></textarea>
           </details>
+          <label class="ai-setting"><input id="use-ml" type="checkbox" checked aria-describedby="ml-description">
+            <span><strong>${icon('sparkles')} Local ML evidence search</strong>
+            <small id="ml-description">Add a job description to find related experience using MiniLM. The model runs in your browser and may download on first use.</small></span>
+          </label>
           <label class="ai-setting"><input id="use-ai" type="checkbox" disabled aria-describedby="ai-description">
             <span><strong>${icon('sparkles')} AI-assisted parsing</strong>
             <small id="ai-description">Checking AI availability…</small></span>
@@ -79,8 +83,8 @@ document.querySelector('#app').innerHTML = `
         <h2 id="workflow-title">What the scan checks</h2>
         <ol class="workflow-list">
           <li><span class="tile">${icon('scan-line')}</span><div><h3>Readable text</h3><p>Review what was extracted from each file, including any OCR or layout issues.</p></div></li>
-          <li><span class="tile">${icon('layout-list')}</span><div><h3>Resume evidence</h3><p>Check experience, skills, and qualifications against the original text.</p></div></li>
-          <li><span class="tile">${icon('target')}</span><div><h3>Job requirements</h3><p>Add a posting to see which requirements your resume supports and where it needs clearer evidence.</p></div></li>
+          <li><span class="tile">${icon('layout-list')}</span><div><h3>Your profile</h3><p>Review roles, education, skills, and an employment timeline with links to the source text.</p></div></li>
+          <li><span class="tile">${icon('target')}</span><div><h3>Relevant experience</h3><p>Find resume passages related to a job requirement, even when they use different words.</p></div></li>
         </ol>
       </aside>
     </div>
@@ -92,7 +96,7 @@ document.querySelector('#app').innerHTML = `
   <div class="dialog-heading"><h2 id="help-title">How scoring works</h2><button class="icon-button" id="close-help" aria-label="Close" type="button">${icon('x')}</button></div>
   <p>Shortlist calculates an advisory score using these checks. Employer ATS rules and recruiter decisions vary.</p>
   <dl><div><dt>ATS readability</dt><dd>20 points</dd></div><div><dt>Resume structure</dt><dd>25 points</dd></div><div><dt>Experience & impact</dt><dd>30 points</dd></div><div><dt>Content coverage or job keyword match</dt><dd>25 points</dd></div></dl>
-  <p>A job description can replace content coverage with a job match. Preferred requirements carry half the weight. AI-assisted reports show the excerpts behind their matches.</p>
+  <p>A job description can replace content coverage with a job match. Preferred requirements carry half the weight. AI-assisted reports show the excerpts behind their matches. Local ML retrieves related passages for you to review. Similarity measures how close the text is in meaning and earns no score points.</p>
 </dialog>`;
 
 const get = id => document.getElementById(id);
@@ -179,7 +183,7 @@ get('export-batch').addEventListener('click', () => {
     const scan = record.report;
     const match = scan?.result.keywords;
     rows.push([record.file.name, scan?.aiNote || (scan ? 'Complete' : record.status), scan?.result.score,
-      scan ? scan.analysis ? 'AI-assisted' : 'Local' : '',
+      scan ? scan.analysis ? 'AI-assisted' : scan.ml ? 'Local + ML' : 'Local' : '',
       match?.total ? Math.round(match.ratio * 100) + '%' : '', scan?.result.improvements[0]?.title]);
   }
   downloadFile('shortlist-batch.csv', '\ufeff' + rows.map(row => row.map(csv).join(',')).join('\r\n'), 'text/csv');
@@ -213,7 +217,7 @@ form.addEventListener('submit', event => {
     get('browse').focus();
     return;
   }
-  batchSettings = { job: get('job').value, useAI: aiEnabled && aiToggle.checked };
+  batchSettings = { job: get('job').value, useAI: aiEnabled && aiToggle.checked, useML: get('use-ml').checked };
   startScan(records, batchSettings);
 });
 
@@ -221,7 +225,7 @@ async function startScan(batch, settings) {
   if (busy) return;
   showError();
   busy = true;
-  for (const control of [get('scan'), get('browse'), get('job'), aiToggle]) control.disabled = true;
+  for (const control of [get('scan'), get('browse'), get('job'), get('use-ml'), aiToggle]) control.disabled = true;
   for (const record of batch) Object.assign(record, { status: 'Queued', report: null, failed: false });
   let completed = 0;
   const updateProgress = () => {
@@ -236,7 +240,7 @@ async function startScan(batch, settings) {
           record.status = status;
           updateProgress();
         });
-        record.status = `${record.report.result.score}/100 · ${record.report.analysis ? 'AI-assisted' : 'Local scan'}`;
+        record.status = `${record.report.result.score}/100 · ${record.report.analysis ? 'AI-assisted' : record.report.ml ? 'Local + ML' : 'Local scan'}`;
       } catch (error) {
         record.failed = true;
         record.status = error.message || 'The resume could not be read.';
@@ -248,7 +252,7 @@ async function startScan(batch, settings) {
     if (batch.length === 1 && records.length === 1 && records[0].report && !current) openReport(records[0].report);
   } finally {
     busy = false;
-    for (const control of [get('scan'), get('browse'), get('job')]) control.disabled = false;
+    for (const control of [get('scan'), get('browse'), get('job'), get('use-ml')]) control.disabled = false;
     aiToggle.disabled = !aiEnabled;
     renderQueue();
   }
@@ -279,16 +283,16 @@ function resetReport() {
 const tabs = { overview: 'Overview', parsed: 'Parsed resume', keywords: 'Job match' };
 
 function renderReport() {
-  const { resume, result, analysis, aiNote } = current;
+  const { resume, result, analysis, aiNote, ml, mlNote } = current;
   const metadata = resume.metadata;
   const note = metadata.ocrPages ? 'English OCR applied. Verify the extracted text against the original.' : '';
-  const warnings = [aiNote, note, metadata.layoutWarning, ...(metadata.warnings || [])].filter(Boolean);
+  const warnings = [aiNote, mlNote, note, metadata.layoutWarning, ...(metadata.warnings || [])].filter(Boolean);
   report.innerHTML = `
     <div class="report-top"><button class="quiet" id="back" type="button">${icon('arrow-left')} ${records.length > 1 ? 'Back to batch' : 'New scan'}</button>
       <button class="secondary" id="download" type="button">${icon('download')} Download report</button></div>
     <section class="report-banner">
       <div><span class="hero-label">${icon('scan-line')} ATS SCAN RESULTS</span><h1 id="report-title" tabindex="-1">Resume report</h1>
-      <p>${escape(metadata.fileName)} <span>·</span> ${resume.wordCount} words extracted <span>·</span> ${analysis ? 'AI-assisted' : 'Local scan'}</p></div>
+      <p>${escape(metadata.fileName)} <span>·</span> ${resume.wordCount} words extracted <span>·</span> ${analysis ? 'AI-assisted' : 'Local scan'}${ml ? ' + ML' : ''}</p></div>
       ${ring(result.score)}
     </section>
     ${warnings.length ? `<div class="report-warnings">${icon('triangle-alert')}<ul>${warnings.map(warning => `<li>${escape(warning)}</li>`).join('')}</ul></div>` : ''}
@@ -326,13 +330,25 @@ function switchTab(next) {
 function overview(result, analysis) {
   const suggestions = result.improvements.map(check => `<li><div class="suggestion-title"><h3>${escape(check.title)}</h3>
     <span>+${check.max - check.points} pts</span></div><p>${escape(check.advice)}</p>${check.evidence ? `<small>${escape(check.evidence)}</small>` : ''}</li>`).join('');
-  return `<div class="report-grid"><section class="card report-card"><h2>Score breakdown</h2>
+  const profile = current.resume.profile;
+  const roles = profile.entries.filter(item => item.kind === 'experience').length;
+  const summary = current.resume.sections.filter(section => section.key === 'summary').flatMap(section => section.lines).join(' ');
+  return `<section class="card profile-overview" aria-label="Profile overview">
+    <div class="profile-intro"><span class="tile">${icon('file-text')}</span><div><h2>${escape(current.resume.contact.name || 'Extracted profile')}</h2>
+    ${current.resume.contact.title ? `<p>${escape(current.resume.contact.title)}</p>` : ''}</div></div>
+    ${summary ? `<p class="profile-summary">${escape(summary)}</p>` : ''}
+    <dl class="profile-stats"><div><dt>Detected roles</dt><dd>${roles}</dd></div><div><dt>Detected skills</dt><dd>${profile.skills.length}</dd></div>
+    <div><dt>Employment timeline</dt><dd>${escape(profile.experience.label)}</dd></div></dl>
+    <p class="muted timeline-note">${escape(profile.experience.notes.join(' '))}</p>
+    </section><div class="report-grid"><section class="card report-card"><h2>Score breakdown</h2>
     <div class="metric-list">${categoryRows(result.categories)}</div>
     <div class="rubric">${result.categories.map(category => `<details><summary>${escape(category.title)} ${icon('chevron-down')}</summary>
     <ul>${category.checks.map(check => `<li><span>${escape(check.title)}</span><b>${check.points}/${check.max}</b></li>`).join('')}</ul></details>`).join('')}</div>
     </section><section class="card report-card"><h2>What to improve</h2>
     <p class="muted">Ordered by potential points in this scan.</p>
     ${suggestions ? `<ol class="suggestions">${suggestions}</ol>` : '<p>Every check earned full points in this scan.</p>'}</section></div>
+  ${profile.issues.length ? `<section class="card report-card ai-improvements"><h2>Profile checks</h2><ul class="suggestions">
+    ${profile.issues.map(item => `<li><h3>${escape(item.title)}</h3><p>${escape(item.detail)}</p><small>${escape(item.evidence)}</small></li>`).join('')}</ul></section>` : ''}
   ${analysis?.improvements.length ? `<section class="card report-card ai-improvements"><h2>AI editing suggestions</h2>
     <ul class="suggestions">${analysis.improvements.map(item => `<li><h3>${escape(item.title)}</h3>
       <p>${escape(item.action)}</p><blockquote>${escape(item.evidence)}</blockquote></li>`).join('')}</ul></section>` : ''}`;
@@ -343,7 +359,7 @@ const entryLabels = {
   volunteer: 'Volunteering', publication: 'Publications', award: 'Awards', other: 'Other experience',
 };
 
-function aiSections(analysis) {
+function profileSections(analysis) {
   if (!analysis) return '';
   const entries = Object.entries(entryLabels).map(([key, label]) => {
     const matches = analysis.entries.filter(item => item.kind === key);
@@ -368,15 +384,33 @@ function parsed(resume, analysis) {
       ${field('Name', contact.name)}${field('Title', contact.title)}${field('Email', contact.email)}${field('Phone', contact.phone)}
       ${field('Location', contact.location)}${field('Links', contact.links)}</dl></section>
     ${header.length ? `<section class="card report-card"><h2>Resume header</h2><ul class="section-lines">${header.map(line => `<li>${escape(line)}</li>`).join('')}</ul></section>` : ''}
-    ${aiSections(analysis)}
-    ${sections.filter(section => section.lines.length).map(section => `<section class="card report-card"><h2>${escape(section.label || sectionTitles[section.key])}</h2>
-      <ul class="section-lines">${section.lines.map(line => `<li>${escape(line)}</li>`).join('')}</ul></section>`).join('')}
+    ${profileSections(analysis?.entries.length ? analysis : resume.profile)}
+    <section class="card report-card"><h2>Source sections</h2><div class="rubric">
+    ${sections.filter(section => section.lines.length).map(section => `<details><summary>${escape(section.label || sectionTitles[section.key])}${icon('chevron-down')}</summary>
+      <ul class="section-lines">${section.lines.map(line => `<li>${escape(line)}</li>`).join('')}</ul></details>`).join('')}</div></section>
     <section class="card report-card"><h2>Detected skills & dates</h2><dl class="fields">${field('Skills', skills)}${field('Date ranges', dates)}</dl></section>
     </div><section class="card report-card raw"><div class="section-heading"><h2>Extracted text</h2><button type="button" class="secondary" id="copy">${icon('copy')} Copy</button></div>
     <pre>${escape(extractedText.replace(/\f/g, '\n'))}</pre></section></div>`;
 }
 
 function keywords(result) {
+  return keywordComparison(result) + modelMatches(current.ml);
+}
+
+function modelMatches(ml) {
+  if (!ml) return '';
+  const limited = ml.evidenceCount < ml.totalEvidence || ml.requirementCount < ml.totalRequirements;
+  return `<section class="card report-card model-matches"><div class="section-heading"><h2>Related experience</h2><span class="optional">${escape(ml.model)} · Local ML</span></div>
+    <p class="muted">Review these passages alongside each requirement. A similarity value measures closeness in meaning. Confirm tools, credentials, and duration against the source.</p>
+    <p class="model-coverage">Compared ${ml.requirementCount} job passages with ${ml.evidenceCount} resume passages.${limited ? ` The documents contain ${ml.totalRequirements} and ${ml.totalEvidence} passages respectively. Only the first passages within the model limit were compared.` : ''}</p>
+    <ul class="model-list">${ml.matches.map(match => `<li><h3>${escape(match.requirement)}</h3>${match.evidence.length ? match.evidence.map(item =>
+      `<div class="model-evidence"><div><span>${escape(sectionTitles[item.section] || item.section)}</span><span>Similarity ${item.similarity.toFixed(2)}</span></div><blockquote>${escape(item.text)}</blockquote></div>`).join('') : '<p class="muted">No related passage met the retrieval threshold.</p>'}</li>`).join('')}</ul>
+    <details class="model-method"><summary>About this model ${icon('chevron-down')}</summary><p>MiniLM-L6-v2 compares English text using sentence embeddings. Results below cosine similarity 0.35 are omitted. This threshold has not been calibrated on hiring outcomes. These suggestions earn no score points.</p>
+      <a href="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2" target="_blank" rel="noreferrer">Read the model card ${icon('arrow-up-right')}</a></details>
+  </section>`;
+}
+
+function keywordComparison(result) {
   const comparison = result.keywords;
   if (!comparison.total) return `<section class="card report-card keyword-empty"><span class="tile">${icon('target')}</span><h2>Job keyword match</h2><p>${
     comparison.provided ? 'The job description had no recognizable keywords. Include explicit requirements such as a “Required skills:” list.' :
@@ -421,7 +455,7 @@ function renderPanel() {
 }
 
 function downloadReport() {
-  const { result, resume, analysis, aiNote } = current;
+  const { result, resume, analysis, aiNote, ml, mlNote } = current;
   const lines = ['Shortlist resume report', resume.metadata.fileName, `ATS score: ${result.score}/100`, '',
     ...result.categories.flatMap(category => [
       `${category.title}: ${category.points}/${category.max}`,
@@ -438,7 +472,16 @@ function downloadReport() {
     lines.push('', 'Job requirement evidence', ...analysis.requirements.map(item =>
       `- ${item.label} (${item.preferred ? 'preferred' : 'required'})\n  Job: ${item.jobEvidence}\n  Resume: ${item.evidence || 'No supporting excerpt'}`));
   }
-  const warnings = [aiNote, resume.metadata.layoutWarning, ...(resume.metadata.warnings || [])].filter(Boolean);
+  lines.push('', 'Employment timeline', resume.profile.experience.label, ...resume.profile.experience.notes,
+    '', 'Profile entries', ...resume.profile.entries.map(item =>
+      `- ${item.kind}: ${[item.title, item.organization, item.dates].filter(Boolean).join(' · ')}\n  Source: ${item.evidence.join(' | ')}`));
+  if (ml) {
+    lines.push('', `Related experience (${ml.model}, revision ${ml.revision})`,
+      `Compared ${ml.requirementCount}/${ml.totalRequirements} job passages and ${ml.evidenceCount}/${ml.totalEvidence} resume passages.`,
+      'Similarity is a retrieval measure. Model suggestions earn no score points.',
+      ...ml.matches.flatMap(match => [match.requirement, ...match.evidence.map(item => `  Similarity ${item.similarity.toFixed(2)}: ${item.text}`)]));
+  }
+  const warnings = [aiNote, mlNote, resume.metadata.layoutWarning, ...(resume.metadata.warnings || [])].filter(Boolean);
   if (resume.metadata.ocrPages) warnings.unshift('English OCR applied. Verify the extracted text against the original.');
   if (warnings.length) lines.push('', 'Extraction notes', ...warnings);
   lines.push('', 'Extracted text', resume.extractedText.replace(/\f/g, '\n'));

@@ -1,12 +1,24 @@
 import { extractResume } from './extract.js';
 import { parseResume, redactContact } from './resume.js';
-import { scoreResume } from './score.js';
+import { scoreResume, skillEvidence } from './score.js';
 
 export const maxFiles = 20;
 
-export async function scanFile(file, { job, useAI }, progress) {
+export async function scanFile(file, { job, useAI, useML = true }, progress) {
   const { text, ...metadata } = await extractResume(file, progress);
   const resume = parseResume(text, metadata);
+  resume.profile.skills = skillEvidence(resume);
+  let ml;
+  let mlNote;
+  if (useML && job.trim()) {
+    try {
+      const { matchWithModel } = await import('./ml-client.js');
+      ml = await matchWithModel(resume, job, progress);
+      if (!ml) mlNote = 'There was too little structured text to compare with the local ML model.';
+    } catch (error) {
+      mlNote = error.message + ' Keyword matching is still available.';
+    }
+  }
   let analysis;
   let aiNote;
   if (useAI) {
@@ -27,7 +39,7 @@ export async function scanFile(file, { job, useAI }, progress) {
       aiNote = (error.name === 'TimeoutError' ? 'The AI request timed out.' : error.message) + ' This report uses the local parser.';
     }
   }
-  return { resume, result: scoreResume(resume, job, analysis?.requirements), analysis, aiNote };
+  return { resume, result: scoreResume(resume, job, analysis?.requirements), analysis, aiNote, ml, mlNote };
 }
 
 export async function runQueue(records, run) {

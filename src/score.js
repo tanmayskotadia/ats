@@ -16,22 +16,42 @@ const catalog = groups.flatMap(group => group.split('|')).map(entry => {
   const [label, aliases = ''] = entry.split('=');
   return { label, aliases: unique([label, ...aliases.split(',').filter(Boolean)]) };
 });
+const namedTechnologies = new Set(groups.slice(0, 3).flatMap(group => group.split('|').map(entry => entry.split('=')[0])));
+for (const concept of ['REST APIs', 'Microservices', 'System design', 'Distributed systems', 'Web accessibility', 'Responsive design', 'Data pipelines', 'Data warehousing']) {
+  namedTechnologies.delete(concept);
+}
 const stopTerms = /^(?:strong|excellent|preferred|required|qualifications?|skills?|experience|years?|degree|knowledge|proficiency|team player|and|or|ability to work|other duties)$/i;
 const escapePattern = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const keywordForm = value => cleanText(value).replace(/\s+/g, ' ');
 
-function termMatches(text, term) {
+function termPattern(term) {
   const normalized = keywordForm(term);
   const pattern = escapePattern(normalized).replace(/ /g, '[\\s-]+');
   const exactCase = /^(?:C|R|Go|ML|TS|JS|QA|CAD|BIM|SEM|CPA|CFA|PMP)$/.test(normalized);
-  return new RegExp(`(?<![\\p{L}\\p{N}+#])${pattern}(?![\\p{L}\\p{N}+#])`, exactCase ? 'u' : 'iu').test(text);
+  return new RegExp(`(?<![\\p{L}\\p{N}+#])${pattern}(?![\\p{L}\\p{N}+#])`, exactCase ? 'gu' : 'giu');
+}
+
+function termMatches(text, term) {
+  return termPattern(term).test(text);
+}
+
+// Keep the scope of a denial local to its clause, including comma-separated skill lists.
+export function positiveTermMatch(text, term) {
+  return [...text.matchAll(termPattern(term))].some(match => {
+    const before = text.slice(0, match.index).split(/[.!?;\n]|\b(?:but|however|although|yet)\b/i).at(-1).slice(-110);
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 80);
+    const deniedBefore = /\b(?:(?:no|without)\s+(?:(?:prior|professional|hands-on|working|practical|commercial|direct)\s+)?(?:experience|knowledge|proficiency|familiarity|skills?|background|expertise|training|exposure)\b|(?:never|not)\s+(?:used|worked|trained|proficient|experienced|familiar|skilled|certified|knowledgeable|qualified)\b|(?:lack|lacks|lacking|unfamiliar|inexperienced)\b)[^.!?;\n]{0,80}$/i.test(before) ||
+      /\b(?:no|without(?:\s+using)?)\s*$/i.test(before);
+    const deniedAfter = /^\s*[(:]?\s*(?:(?:experience|skills?|knowledge|certification)\s*)?(?:(?:is|are|was|were|:)\s*)?(?:none\b|no\s+(?:experience|knowledge)\b|unfamiliar\b|not\s+(?:required|used|known|held|earned|completed|available|proficient|familiar|experienced|skilled|certified)\b)/i.test(after);
+    return !deniedBefore && !deniedAfter;
+  });
 }
 
 export function compareKeywords(resume, job) {
   const description = cleanText(job);
   if (!description) return { provided: false, matched: [], missing: [], total: 0, ratio: 0 };
   const jobLines = description.split('\n');
-  const terms = catalog.filter(term => term.aliases.some(alias => termMatches(description, alias)));
+  const terms = catalog.filter(term => term.aliases.some(alias => positiveTermMatch(description, alias)));
   const explicit = [];
   let inSkillList = false;
   for (const line of jobLines.map(value => value.trim())) {
@@ -49,6 +69,7 @@ export function compareKeywords(resume, job) {
   }
   for (const label of unique(explicit.map(value => value.trim().replace(/[.!]$/, '')).filter(Boolean))) {
     if (label.length > 45 || label.split(/\s+/).length > 5 || stopTerms.test(label) || !/\p{L}/u.test(label)) continue;
+    if (!positiveTermMatch(description, label)) continue;
     if (!terms.some(term => term.aliases.some(alias => termMatches(label, alias)))) terms.push({ label, aliases: [label] });
   }
   const required = [];
@@ -63,12 +84,32 @@ export function compareKeywords(resume, job) {
   const preferredText = keywordForm(preferred.join(' '));
   const resumeLines = resume.text.split(/[\n\f]/);
   const sortedTerms = terms.map(term => {
-    const preferredOnly = !term.aliases.some(alias => termMatches(requiredText, alias)) &&
-      term.aliases.some(alias => termMatches(preferredText, alias));
-    const evidence = resumeLines.find(line => term.aliases.some(alias => termMatches(line, alias)));
+    const preferredOnly = !term.aliases.some(alias => positiveTermMatch(requiredText, alias)) &&
+      term.aliases.some(alias => positiveTermMatch(preferredText, alias));
+    const evidence = resumeLines.find(line => term.aliases.some(alias => positiveTermMatch(line, alias)));
     return { label: term.label, preferred: preferredOnly, evidence: evidence || '' };
   }).sort((first, second) => Number(first.preferred) - Number(second.preferred) || first.label.localeCompare(second.label));
   return summarizeMatches(sortedTerms);
+}
+
+export function skillEvidence(resume) {
+  const sections = resume.sections.filter(section => !['contact', 'interests', 'languages'].includes(section.key));
+  const detected = catalog.flatMap(term => {
+    for (const section of sections) {
+      const evidence = section.lines.find(line => term.aliases.some(alias => positiveTermMatch(line, alias)));
+      if (evidence) return [{ label: term.label, evidence, section: section.label }];
+    }
+    return [];
+  });
+  const seen = new Set();
+  return [...detected, ...resume.profile.skills].filter(item => {
+    const label = item.label.toLowerCase();
+    const canonical = catalog.find(term => term.aliases.some(alias => alias.toLowerCase() === label));
+    const key = canonical?.label.toLowerCase() || label;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function summarizeMatches(terms) {
@@ -78,16 +119,80 @@ function summarizeMatches(terms) {
   return { provided: true, matched, missing, total: terms.length, ratio: terms.length ? weight(matched) / weight(terms) : 0 };
 }
 
+const evidenceForm = text => cleanText(text).replace(/\s+/g, ' ').toLowerCase();
+const credentialFamilies = [
+  /\b(?:bachelor(?:'s)?|b\.?s\.?c?\.?|b\.?a\.?)\b/i,
+  /\b(?:master(?:'s)?|m\.?s\.?c?\.?|m\.?a\.?|mba)\b/i,
+  /\b(?:doctorate|ph\.?d\.?)\b/i,
+  /\bPMP\b/i, /\bCPA\b/i, /\bCFA\b/i, /\bRN\b/i,
+];
+
+function durationMonths(text) {
+  return [...text.matchAll(/\b(?:(\d+(?:\.\d+)?)\s*(?:-|to)\s*)?(\d+(?:\.\d+)?)\+?\s*(years?|months?)\b/gi)]
+    .map(match => Number(match[1] || match[2]) * (/^year/i.test(match[3]) ? 12 : 1));
+}
+
+function cfaLevels(text) {
+  const roman = { i: 1, ii: 2, iii: 3 };
+  return [...text.matchAll(/\bCFA\b[^.!?;\n]{0,30}?\blevel\s*(I{1,3}|[1-3])\b/gi)]
+    .map(match => roman[match[1].toLowerCase()] || Number(match[1]));
+}
+
+function verifiedRequirements(resume, job, requirements) {
+  const source = evidenceForm(resume.text);
+  const posting = evidenceForm(job);
+  const seen = new Set();
+  return requirements.filter(item => {
+    const label = evidenceForm(item.label || '');
+    if (!label || seen.has(label) || !posting.includes(evidenceForm(item.jobEvidence || item.label))) return false;
+    seen.add(label);
+    return true;
+  }).map(item => {
+    const evidence = item.evidence || '';
+    const present = evidenceForm(evidence).length >= 3 && source.includes(evidenceForm(evidence));
+    const duration = durationMonths(item.label + ' ' + (item.jobEvidence || ''));
+    const observed = durationMonths(evidence);
+    const explicitTerms = catalog.filter(term => term.aliases.some(alias => termMatches(item.label, alias)));
+    const durationTools = explicitTerms.filter(term => namedTechnologies.has(term.label));
+    const durationSupported = !duration.length || observed.some(months => months >= Math.max(...duration)) &&
+      durationTools.every(term => term.aliases.some(alias => positiveTermMatch(evidence, alias)));
+    const credentials = credentialFamilies.filter(pattern => pattern.test(item.label));
+    const credentialLanguage = /\b(?:certified|certification|certificate|licen[cs]e|licen[cs]ed)\b/i;
+    const needsCredential = credentials.length > 0 || credentialLanguage.test(item.label);
+    const credentialWords = credentialLanguage.test(item.label) ? (item.label.match(/[\p{L}\p{N}]+/gu) || [])
+      .filter(word => !/^(?:valid|active|current|certified|certification|certificate|licen[cs]e|licen[cs]ed|required|preferred|with|and|the|a|an|in|of)$/i.test(word)) : [];
+    const requiredLevels = cfaLevels(item.label);
+    const observedLevels = cfaLevels(evidence);
+    const credentialSupported = credentials.every(pattern => pattern.test(evidence)) &&
+      (!requiredLevels.length || observedLevels.some(level => level >= Math.max(...requiredLevels))) &&
+      (!credentialLanguage.test(item.label) || credentialLanguage.test(evidence) && credentialWords.every(word => positiveTermMatch(evidence, word))) &&
+      (!needsCredential || !/\b(?:pursuing|preparing|studying|study|working toward|candidate|expected|in progress|planned|exam scheduled)\b/i.test(evidence));
+    const denied = explicitTerms.some(term => term.aliases.some(alias => termMatches(evidence, alias)) &&
+      !term.aliases.some(alias => positiveTermMatch(evidence, alias)));
+    return { ...item, evidence: present && durationSupported && credentialSupported && !denied ? evidence : '' };
+  });
+}
+
 export function scoreResume(resume, job = '', requirements = []) {
-  const { contact, experienceDates, sections, statements, actionStatements, quantifiedStatements, skills, wordCount, metadata } = resume;
+  const { contact, experienceDates, sections, skills, wordCount, metadata } = resume;
+  const seen = new Set();
+  const statements = resume.statements.filter(line => {
+    const normalized = evidenceForm(line);
+    if ((normalized.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) < 6 || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+  const actionStatements = statements.filter(line => resume.actionStatements.includes(line));
+  const quantifiedStatements = statements.filter(line => resume.quantifiedStatements.includes(line));
   const has = key => sections.some(section => section.key === key && section.lines.length > 0);
-  const keywords = requirements.length ? { ...summarizeMatches(requirements), semantic: true } : compareKeywords(resume, job);
+  const groundedRequirements = verifiedRequirements(resume, job, requirements);
+  const keywords = groundedRequirements.length ? { ...summarizeMatches(groundedRequirements), semantic: true } : compareKeywords(resume, job);
   const check = (id, title, points, max, advice, evidence = '') => ({ id, title, points, max, advice, evidence });
   const categories = [
     { id: 'readability', title: 'ATS readability', icon: 'scan-line', checks: [
       check('text', 'Readable text', wordCount >= 45 ? 8 : wordCount >= 15 ? 4 : 0, 8,
         'Export your resume as a text-based PDF or DOCX and confirm the extracted text contains every section.', `${wordCount} words extracted`),
-      check('format', 'Reading order', metadata.layoutWarning || metadata.ocrPages ? 2 : 6, 6,
+      check('format', 'Reading order', wordCount < 15 ? 0 : metadata.layoutWarning || metadata.ocrPages ? 2 : 6, 6,
         'Use a single-column layout with standard text. Review the parsed text for skipped or reordered lines.',
         metadata.ocrPages ? `OCR used on ${metadata.ocrPages} page(s)` : metadata.layoutWarning || 'No layout issues detected'),
       check('headings', 'Recognizable headings', Math.min(6, new Set(sections.filter(section => section.key !== 'other' && section.lines.length).map(section => section.key)).size * 2), 6,
@@ -121,7 +226,7 @@ export function scoreResume(resume, job = '', requirements = []) {
   ] } : { id: 'content', title: 'Content coverage', icon: 'target', checks: [
     check('skill-detail', 'Specific skills', Math.min(10, skills.length * 2), 10,
       'List at least five specific skills you can demonstrate, such as tools, methods, or industry competencies.'),
-    check('profile', 'Professional summary', has('summary') ? 5 : 0, 5,
+    check('profile', 'Professional summary', sections.some(section => section.key === 'summary' && section.lines.join(' ').split(/\s+/).length >= 20) ? 5 : 0, 5,
       'Add a short summary that names your target role, experience level, and strongest relevant skills.'),
     check('detail', 'Relevant detail', wordCount >= 150 ? 7 : wordCount >= 85 ? 4 : wordCount >= 45 ? 2 : 0, 7,
       'Expand brief role descriptions with relevant responsibilities, tools, and accomplishments.'),

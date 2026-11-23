@@ -1,3 +1,5 @@
+import { buildProfile, isPositiveSkill } from './profile.js';
+
 const headings = {
   summary: 'Summary|Professional Summary|Executive Summary|Career Summary|Profile|Professional Profile|About Me|Objective|Career Objective|Overview|Personal Statement',
   experience: 'Experience|Work Experience|Professional Experience|Employment|Employment History|Work History|Career History|Relevant Experience|Professional Background|Internships|Industry Experience|Selected Experience|Positions Held|Work Experience and Internships',
@@ -39,7 +41,7 @@ export function cleanText(text) {
 
 const month = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\.?';
 const year = '(?:19|20)\\d{2}';
-const date = `(?:${month}\\s+)?${year}|(?:0?[1-9]|1[0-2])[/.-]${year}`;
+const date = `${year}-(?:0[1-9]|1[0-2])|(?:${month}\\s+)?${year}|(?:0?[1-9]|1[0-2])[/.-]${year}`;
 const dateRange = new RegExp(`\\b(?:${date})\\s*(?:-|to|through)\\s*(?:Present|Current|Now|${date})\\b`, 'gi');
 export const datesIn = text => unique([...text.matchAll(dateRange)].map(match => match[0]));
 const emailPattern = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/gi;
@@ -54,9 +56,6 @@ function matchHeading(line) {
   const normalized = label.toLowerCase().replace(/\s*&\s*/g, ' and ').trim();
   const key = headingIndex.get(normalized);
   if (key) return { key, label, inline: rest.join(':').trim() };
-  if (line.length < 45 && /^[A-Z][A-Z &/()]{4,}$/.test(line) && !/^(?:[A-Z]+ ){0,2}[A-Z]+ (?:INC|LLC|LTD)$/.test(line)) {
-    return { key: 'other', label: line, inline: '' };
-  }
   return null;
 }
 
@@ -90,7 +89,8 @@ function extractContact(text, headerLines, embeddedLinks) {
       return digits.length >= 8 && digits.length <= 18;
     }));
   const links = unique([...text.matchAll(linkPattern)].map(match => match[0].replace(/[.)\]}]+$/g, '')).concat(embeddedLinks));
-  const candidates = headerLines.slice(0, 6).map(line => line.split(/\s[|•]\s/)[0].trim());
+  const candidates = headerLines.slice(0, 6).flatMap(line => line.split(/\s*[|•]\s*/))
+    .map(line => line.trim().replace(/^(?:full name|name):\s*/i, ''));
   const name = candidates.find(plausibleName) || '';
   const title = candidates.find(line => line !== name && line.length < 95 &&
     /\b(?:developer|engineer|manager|analyst|designer|specialist|consultant|student|writer|scientist|director|architect|intern|associate|accountant|assistant|lead|administrator|executive|teacher|coordinator)\b/i.test(line) &&
@@ -107,13 +107,13 @@ function resumeStatements(lines) {
   const statements = [];
   for (const line of lines) {
     const content = line.replace(bulletPattern, '');
-    if (bulletPattern.test(line) || actionPattern.test(content)) {
+    if ((bulletPattern.test(line) || actionPattern.test(content)) && content.split(/\s+/).length >= 3) {
       statements.push(content);
     } else if (statements.length && /^[a-z]/.test(content) && content.split(/\s+/).length >= 4) {
       statements[statements.length - 1] += ' ' + content;
     }
   }
-  return statements;
+  return unique(statements);
 }
 
 export function parseResume(text, metadata = {}) {
@@ -122,12 +122,11 @@ export function parseResume(text, metadata = {}) {
   const sections = [];
   const header = [];
   let current;
-  for (const [index, line] of lines.entries()) {
+  for (const line of lines) {
     if (!line) continue;
-    const heading = matchHeading(line);
-    const knownHeading = heading && headingIndex.has(heading.label.toLowerCase().replace(/\s*&\s*/g, ' and '));
-    const isHeading = heading && (knownHeading || (index > 1 && !lines[index - 1] && !plausibleName(line)));
-    if (isHeading) {
+    const detectedHeading = matchHeading(line);
+    const heading = current?.key === 'skills' && detectedHeading?.key === 'languages' && detectedHeading.inline ? null : detectedHeading;
+    if (heading) {
       current = { key: heading.key, label: heading.label, lines: heading.inline ? [heading.inline] : [] };
       sections.push(current);
     } else if (current) {
@@ -138,14 +137,14 @@ export function parseResume(text, metadata = {}) {
   }
   const byKey = key => sections.filter(section => section.key === key).flatMap(section => section.lines);
   const contact = extractContact(normalized, [...header, ...byKey('contact')], metadata.links ?? []);
-  const skills = unique(byKey('skills').flatMap(line => line
+  const skills = unique(byKey('skills').flatMap(line => line.split(/;|\b(?:but|however)\b/i)).filter(isPositiveSkill).flatMap(line => line
     .replace(bulletPattern, '')
     .replace(/^[^:]{1,38}:\s+/, '')
     .split(/\s*[,;|•]\s*|\s{2,}/)
     .map(skill => skill.trim())
-    .filter(Boolean)));
+    .filter(skill => skill && isPositiveSkill(skill))));
   const statements = resumeStatements([...byKey('experience'), ...byKey('projects')]);
-  return {
+  const resume = {
     text: normalized,
     extractedText: text.trim(),
     contact,
@@ -160,6 +159,8 @@ export function parseResume(text, metadata = {}) {
     wordCount: normalized.match(/[\p{L}\p{N}][\p{L}\p{N}+#'.-]*/gu)?.length ?? 0,
     metadata,
   };
+  resume.profile = buildProfile(resume);
+  return resume;
 }
 
 export function redactContact(text, contact) {
