@@ -36,30 +36,44 @@ h2 { font-size: 20px; font-weight: 800; letter-spacing: -.55px; }
 .quiet:hover, .browse:hover { color: var(--violet-dark); text-decoration: underline; text-underline-offset: 4px; }
 .quiet svg { width: 16px; height: 16px; }
 
-.hero, .report-banner {
+.report-banner {
   position: relative; overflow: hidden; color: #fff;
   background: radial-gradient(ellipse at 89% 30%, #513095 0%, #33205c 38%, #201435 74%);
   border: 1px solid #382456; border-radius: 23px; isolation: isolate;
 }
-.hero { min-height: 299px; margin-top: 32px; display: flex; align-items: center; padding: 38px 48px; }
-.hero-content { position: relative; z-index: 1; }
+.hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  margin-top: 32px; padding: 12px; border-radius: 26px;
+  background: linear-gradient(115deg, #e8edf7, #eee8f8 55%, #e3edf0);
+  border: 1px solid #e4e2ef;
+  box-shadow: 0 12px 40px #39305508;
+}
+.hero::before {
+  content: ""; position: absolute; inset: -40px; z-index: -1;
+  background:
+    radial-gradient(ellipse at 82% 18%, #b8a5e7 0, transparent 48%),
+    radial-gradient(ellipse at 12% 90%, #b0c8e5 0, transparent 52%),
+    radial-gradient(ellipse at 91% 96%, #c5e1db 0, transparent 42%);
+  filter: blur(24px); pointer-events: none;
+}
+.hero-content {
+  position: relative; padding: 38px 44px; min-height: 280px;
+  background: linear-gradient(125deg, #ffffffb8, #ffffff50);
+  border: 1px solid #ffffffd9; border-radius: 17px;
+  -webkit-backdrop-filter: blur(28px) saturate(1.2);
+  backdrop-filter: blur(28px) saturate(1.2);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 #ffffff66, 0 8px 28px #55527508;
+}
 .hero-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 750; font-size: 11px; letter-spacing: 1.7px; color: #ddd1ff; }
 .hero-label svg { width: 16px; height: 16px; }
 .hero h1, .report-banner h1 { font-size: clamp(34px, 5.3vw, 59px); font-weight: 800; letter-spacing: -.062em; line-height: 1.04; margin: 13px 0 17px; }
 .hero p, .report-banner p { font-size: 15px; line-height: 1.65; color: #ded5ed; max-width: 440px; }
-.hero-art { position: absolute; inset: 0 0 0 46%; overflow: hidden; pointer-events: none; opacity: .95; }
-.hero-art::before {
-  position: absolute; content: ""; inset: 0;
-  background: radial-gradient(circle, #c2a8ff55 1px, transparent 1.6px) 0 0 / 18px 18px;
-  mask-image: radial-gradient(ellipse at 68% 50%, #000 0%, transparent 74%);
+.hero .hero-label { color: #625879; font-size: 10px; letter-spacing: 1.4px; }
+.hero h1 { color: #29263e; font-size: clamp(34px, 4.5vw, 52px); font-weight: 700; letter-spacing: -.045em; line-height: 1.1; margin: 18px 0 15px; }
+.hero p { color: #5a566e; max-width: 560px; font-size: 15px; line-height: 1.7; }
+@supports not (backdrop-filter: blur(1px)) {
+  .hero-content { background: #f4f2faeb; }
 }
-.hero-art span, .hero-art i, .hero-art b { position: absolute; display: block; border: 1px solid #c6a7ff51; border-radius: 50%; aspect-ratio: 1; transform: translate(-50%, -50%); left: 69%; top: 53%; }
-.hero-art span { width: 375px; box-shadow: 0 0 0 30px #a87df615, 0 0 0 62px #a87df614, inset 0 0 65px #b588fc24; }
-.hero-art i { width: 284px; border-style: dashed; }
-.hero-art b { width: 203px; box-shadow: inset 0 0 45px #9a63f74a; }
-.hero-art b::before, .hero-art span::after { content: ""; position: absolute; width: 8px; height: 8px; background: #c7adff; border-radius: 50%; box-shadow: 0 0 16px #d7beff; }
-.hero-art b::before { left: 16%; top: 12%; }
-.hero-art span::after { right: 14%; bottom: 13%; width: 6px; height: 6px; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1.32fr) minmax(0, 1fr); gap: 22px; align-items: start; margin-top: 22px; }
 .card { background: #fff; border: 1px solid var(--line); border-radius: 19px; box-shadow: 0 2px 5px #25174105; }
@@ -183,7 +197,7 @@ dialog dd { margin: 0; font-weight: 700; white-space: nowrap; }
 
 @media (max-width: 800px) {
   .shell { width: calc(100% - 44px); }
-  .hero { min-height: 255px; padding-inline: 30px; }
+  .hero-content { min-height: 255px; padding: 30px; }
   .workspace { gap: 14px; }
   .scanner-card, .workflow-card, .report-card { padding: 17px; }
 }
@@ -193,8 +207,9 @@ dialog dd { margin: 0; font-weight: 700; white-space: nowrap; }
   .brand { font-size: 23px; }
   .brand-icon { width: 30px; height: 30px; }
   .help-button { font-size: 11px; gap: 4px; }
-  .hero { min-height: 230px; padding: 22px; margin-top: 15px; border-radius: 17px; }
-  .hero-art { left: 32%; opacity: .43; }
+  .hero { padding: 8px; margin-top: 15px; border-radius: 22px; }
+  .hero-content { min-height: auto; padding: 27px 22px; border-radius: 14px; }
+  .hero h1 { font-size: clamp(29px, 7vw, 38px); }
   .hero p, .report-banner p { font-size: 13px; }
   .workspace, .report-grid { grid-template-columns: minmax(0, 1fr); }
   .workspace { margin-top: 13px; }

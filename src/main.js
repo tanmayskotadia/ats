@@ -43,7 +43,6 @@ document.querySelector('#app').innerHTML = `
 <main class="shell">
   <div id="scanner">
     <section class="hero">
-      <div class="hero-art" aria-hidden="true"><span></span><i></i><b></b></div>
       <div class="hero-content">
         <div class="hero-label">${icon('scan-line')} ATS RESUME CHECKER</div>
         <h1>See how your resume<br class="desktop-break"> reads to an ATS.</h1>
