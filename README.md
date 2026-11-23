@@ -2,6 +2,8 @@
 
 Shortlist reads a resume, shows what it extracted, and returns an ATS readiness score out of 100. Analyze one file or upload up to 20 resumes against a shared job description. Each file has its own report, and a batch can be exported as a CSV summary.
 
+Use **Edit text and rescan** from a report to correct OCR mistakes or try a resume edit. You can update the job description in the same editor. The app recomputes the profile, score, feedback, and enabled model results and marks reports that use edited text. It keeps the original extraction available to restore during the session. Changes are held in browser memory, and the updated batch row stays associated with its source file. **Profile JSON** in the Parsed resume tab exports structured fields, evidence, feedback, and the current score. Reports also highlight specific passages with vague wording, repeated statements, or missing role details.
+
 ## Run locally
 
 Requires Node.js 22.13+.
@@ -29,6 +31,7 @@ The weights are about 23 MB. The local ML runtime is also downloaded by the brow
 - Profiles group employment, education, projects, and credentials with their source lines. Skills are detected in both the Skills section and role descriptions, including common aliases.
 - Employment duration uses the union of explicit month ranges, so overlapping roles count once. Year-only, missing, reversed, and future dates are flagged. The month total is an estimate from calendar months and includes internships that appear under Experience.
 - ML compares up to 36 job passages against 160 resume passages, with a 420-character limit per chunk and a tokenizer limit of 192 tokens. Reports show when the passage limit was reached. At most one inference job runs at a time per browser, sharing the loaded model across the batch.
+- Job passage selection skips company and benefits sections, retains short explicit skill requirements, and resumes at requirement headings. Large resumes are sampled across sections so later projects, education, and skills remain represented.
 - The report shows the two nearest passages whose cosine similarity is at least 0.35. Similarity is a retrieval measure and earns no score points. This threshold has not been calibrated on hiring outcomes. English paraphrases can be helpful, while tools, credentials, durations, and negation still need checking against the source.
 - Model failure and timeout preserve the profile and keyword report and display a note. Machine learning runs only when the checkbox is enabled and a job description is present.
 

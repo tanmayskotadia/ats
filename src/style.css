@@ -254,8 +254,29 @@ dialog dd { margin: 0; font-weight: 700; white-space: nowrap; }
 .model-method p { margin-top: 9px; }
 .model-method a { display: inline-flex; gap: 4px; margin-top: 8px; color: var(--violet-dark); }
 .model-method svg { width: 14px; height: 14px; }
+.report-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.revision-note { color: var(--muted); margin-top: 12px; font-size: 12px; line-height: 1.6; }
+.edit-dialog { width: min(800px, calc(100vw - 30px)); max-height: calc(100dvh - 30px); overflow: auto; }
+.editor-label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 15px 0 6px; font-size: 13px; font-weight: 700; }
+.editor-label .quiet { font-size: 11px; }
+.edit-dialog textarea { display: block; width: 100%; resize: vertical; border: 1px solid #dcd6e9; border-radius: 9px; padding: 11px; font-size: 13px; line-height: 1.7; color: var(--ink); }
+.edit-dialog .ai-setting { margin-top: 13px; }
+.editor-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding-top: 10px; }
+.editor-actions > span { flex: 1; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.feedback-list { list-style: none; padding: 0; margin: 14px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.feedback-list li { border: 1px solid var(--line); border-radius: 11px; padding: 14px; }
+.feedback-list .suggestion-title { flex-wrap: wrap; }
+.feedback-list blockquote { margin: 10px 0; padding: 9px 11px; border-left: 2px solid #b9a0ff; background: #f8f6ff; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.feedback-list .feedback-section { color: var(--muted); font-size: 11px; }
+.parsed-sections .section-heading { margin-bottom: 13px; flex-wrap: wrap; }
+.parsed-sections .section-heading h2 { margin-bottom: 0; }
 @media (max-width: 640px) {
   .profile-stats { grid-template-columns: 1fr 1fr; }
   .profile-stats div:last-child { grid-column: 1 / -1; }
   .model-list { grid-template-columns: minmax(0, 1fr); }
+  .feedback-list { grid-template-columns: minmax(0, 1fr); }
+  .report-top { flex-wrap: wrap; }
+  .editor-actions { flex-wrap: wrap; }
+  .editor-actions > span { flex-basis: 100%; }
+  .edit-dialog #edit-text { height: 190px; }
 }

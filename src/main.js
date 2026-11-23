@@ -3,7 +3,7 @@ import '@fontsource-variable/manrope';
 import './style.css';
 import { validateFile } from './extract.js';
 import { sectionTitles } from './resume.js';
-import { maxFiles, runQueue, scanFile } from './scan.js';
+import { maxFiles, maxResumeTextCharacters, runQueue, scanFile, reviseScan } from './scan.js';
 
 const iconFiles = import.meta.glob(
   '/node_modules/lucide-static/icons/{scan-line,file-text,shield-check,arrow-up-right,upload,chevron-down,arrow-right,chart-no-axes-column-increasing,layout-list,target,check,info,x,arrow-left,download,copy,triangle-alert,plus,sparkles,lock,key-round,search,check-circle,loader-circle}.svg',
@@ -19,6 +19,7 @@ let batchSettings;
 let busy = false;
 let current;
 let tab = 'overview';
+let revising = false;
 
 function ring(score) {
   return `<div class="ring" style="--score:${score}%">
@@ -97,6 +98,21 @@ document.querySelector('#app').innerHTML = `
   <p>Shortlist calculates an advisory score using these checks. Employer ATS rules and recruiter decisions vary.</p>
   <dl><div><dt>ATS readability</dt><dd>20 points</dd></div><div><dt>Resume structure</dt><dd>25 points</dd></div><div><dt>Experience & impact</dt><dd>30 points</dd></div><div><dt>Content coverage or job keyword match</dt><dd>25 points</dd></div></dl>
   <p>A job description can replace content coverage with a job match. Preferred requirements carry half the weight. AI-assisted reports show the excerpts behind their matches. Local ML retrieves related passages for you to review. Similarity measures how close the text is in meaning and earns no score points.</p>
+</dialog>
+<dialog id="edit-dialog" class="edit-dialog" aria-labelledby="edit-title">
+  <form id="edit-form">
+    <div class="dialog-heading"><h2 id="edit-title">Edit text and rescan</h2><button class="icon-button" id="close-editor" aria-label="Close editor" type="button">${icon('x')}</button></div>
+    <p>Correct the text against your resume, or try an edit. The updated report will use this text.</p>
+    <div class="editor-label"><label for="edit-text">Resume text</label><button type="button" class="quiet" id="restore-text">Restore extracted text</button></div>
+    <textarea id="edit-text" maxlength="${maxResumeTextCharacters}" rows="12" required spellcheck="false"></textarea>
+    <label class="editor-label" for="edit-job">Job description</label>
+    <textarea id="edit-job" maxlength="30000" rows="4" placeholder="Paste the role requirements to update your match."></textarea>
+    <label class="ai-setting"><input type="checkbox" id="edit-ml"><span><strong>Local ML evidence search</strong><small>Compare resume passages with the job description in your browser.</small></span></label>
+    <label class="ai-setting"><input type="checkbox" id="edit-ai"><span><strong>AI-assisted parsing</strong><small id="edit-ai-description"></small></span></label>
+    <div id="edit-error" class="alert" role="alert" hidden></div>
+    <div class="editor-actions"><span id="edit-status" role="status"></span><button type="button" class="secondary" id="cancel-edit">Cancel</button>
+      <button type="submit" class="primary" id="save-edit">Update report ${icon('arrow-right')}</button></div>
+  </form>
 </dialog>`;
 
 const get = id => document.getElementById(id);
@@ -158,6 +174,7 @@ function renderQueue() {
   }
   get('scan').innerHTML = busy ? `${icon('loader-circle')} Analyzing resumes…` :
     `${icon('scan-line')} ${records.length > 1 ? `Analyze ${records.length} resumes` : 'Analyze resume'} ${icon('arrow-right')}`;
+  if (get('edit-report')) get('edit-report').disabled = busy;
 }
 
 const aiToggle = get('use-ai');
@@ -178,13 +195,14 @@ get('export-batch').addEventListener('click', () => {
     const safe = /^(?:\s*[=+@-]|[\t\r\n])/.test(cell) ? "'" + cell : cell;
     return '"' + safe.replaceAll('"', '""') + '"';
   };
-  const rows = [['Filename', 'Status', 'Score / 100', 'Parser', 'Job match', 'Top improvement']];
+  const rows = [['Filename', 'Status', 'Score / 100', 'Parser', 'Text source', 'Job match', 'Job description', 'Top improvement']];
   for (const record of records) {
     const scan = record.report;
     const match = scan?.result.keywords;
     rows.push([record.file.name, scan?.aiNote || (scan ? 'Complete' : record.status), scan?.result.score,
       scan ? scan.analysis ? 'AI-assisted' : scan.ml ? 'Local + ML' : 'Local' : '',
-      match?.total ? Math.round(match.ratio * 100) + '%' : '', scan?.result.improvements[0]?.title]);
+      scan ? scan.resume.metadata.textEdited ? 'Edited text' : 'File extraction' : '',
+      match?.total ? Math.round(match.ratio * 100) + '%' : '', scan?.settings.job, scan?.result.improvements[0]?.title]);
   }
   downloadFile('shortlist-batch.csv', '\ufeff' + rows.map(row => row.map(csv).join(',')).join('\r\n'), 'text/csv');
 });
@@ -207,6 +225,65 @@ get('help').addEventListener('click', () => get('help-dialog').showModal());
 get('close-help').addEventListener('click', () => get('help-dialog').close());
 get('help-dialog').addEventListener('click', event => {
   if (event.target === get('help-dialog')) event.target.close();
+});
+
+function openEditor() {
+  if (busy || !current) return;
+  get('edit-text').value = current.resume.extractedText;
+  get('edit-job').value = current.settings.job;
+  get('edit-ml').checked = current.settings.useML;
+  get('edit-ai').checked = aiEnabled && current.settings.useAI;
+  get('edit-ai').disabled = !aiEnabled;
+  get('edit-ai-description').textContent = aiEnabled ?
+    'Send edited resume and job text to OpenAI. Detected resume emails and phone numbers are masked.' :
+    'AI is unavailable on this server. You can use local parsing and ML.';
+  get('edit-error').hidden = true;
+  get('edit-status').textContent = '';
+  get('edit-dialog').showModal();
+  get('edit-text').focus();
+  get('edit-text').setSelectionRange(0, 0);
+  get('edit-text').scrollTop = 0;
+}
+
+for (const id of ['close-editor', 'cancel-edit']) {
+  get(id).addEventListener('click', () => { if (!revising) get('edit-dialog').close(); });
+}
+get('edit-dialog').addEventListener('cancel', event => { if (revising) event.preventDefault(); });
+get('restore-text').addEventListener('click', () => {
+  get('edit-text').value = current.originalText;
+  get('edit-status').textContent = 'Original extracted text restored in the editor.';
+});
+get('edit-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (revising || !current) return;
+  const previous = current;
+  const text = get('edit-text').value;
+  const settings = { job: get('edit-job').value, useML: get('edit-ml').checked, useAI: aiEnabled && get('edit-ai').checked };
+  revising = true;
+  get('edit-error').hidden = true;
+  const controls = [...get('edit-form').querySelectorAll('button, textarea, input')];
+  for (const control of controls) control.disabled = true;
+  try {
+    const next = await reviseScan(previous, text, settings, status => { get('edit-status').textContent = status; });
+    const record = records.find(item => item.report === previous);
+    if (record) {
+      record.report = next;
+      record.status = `${next.result.score}/100 · Updated report`;
+    }
+    current = next;
+    renderQueue();
+    get('edit-dialog').close();
+    renderReport();
+    get('report-title').focus({ preventScroll: true });
+  } catch (error) {
+    get('edit-error').textContent = error.message || 'The report could not be updated. Try again.';
+    get('edit-error').hidden = false;
+    get('edit-status').textContent = '';
+  } finally {
+    revising = false;
+    for (const control of controls) control.disabled = false;
+    get('edit-ai').disabled = !aiEnabled;
+  }
 });
 
 form.addEventListener('submit', event => {
@@ -289,18 +366,21 @@ function renderReport() {
   const warnings = [aiNote, mlNote, note, metadata.layoutWarning, ...(metadata.warnings || [])].filter(Boolean);
   report.innerHTML = `
     <div class="report-top"><button class="quiet" id="back" type="button">${icon('arrow-left')} ${records.length > 1 ? 'Back to batch' : 'New scan'}</button>
-      <button class="secondary" id="download" type="button">${icon('download')} Download report</button></div>
+      <div class="report-actions"><button class="secondary" id="edit-report" type="button" ${busy ? 'disabled' : ''}>Edit text and rescan</button>
+      <button class="secondary" id="download" type="button">${icon('download')} Download report</button></div></div>
     <section class="report-banner">
       <div><span class="hero-label">${icon('scan-line')} ATS SCAN RESULTS</span><h1 id="report-title" tabindex="-1">Resume report</h1>
-      <p>${escape(metadata.fileName)} <span>·</span> ${resume.wordCount} words extracted <span>·</span> ${analysis ? 'AI-assisted' : 'Local scan'}${ml ? ' + ML' : ''}</p></div>
+      <p>${escape(metadata.fileName)} <span>·</span> ${resume.wordCount} words analyzed <span>·</span> ${analysis ? 'AI-assisted' : 'Local scan'}${ml ? ' + ML' : ''}${metadata.textEdited ? ' · Edited text' : ''}</p></div>
       ${ring(result.score)}
     </section>
+    ${current.previous ? `<p class="revision-note" role="status">Report updated · Previous score ${current.previous.score}/100${current.previous.jobChanged ? ' · Job description changed' : ''}${current.previous.aiChanged ? ' · Parsing mode changed' : ''}. ${metadata.textEdited ? 'This scan uses edited resume text.' : 'This scan uses the original extracted text.'}</p>` : ''}
     ${warnings.length ? `<div class="report-warnings">${icon('triangle-alert')}<ul>${warnings.map(warning => `<li>${escape(warning)}</li>`).join('')}</ul></div>` : ''}
     <div class="tabs" role="tablist" aria-label="Resume report">${Object.entries(tabs).map(([key, title]) =>
       `<button id="tab-${key}" role="tab" aria-selected="${tab === key}" tabindex="${tab === key ? 0 : -1}" aria-controls="panel" type="button">${title}</button>`).join('')}</div>
     <div id="panel" role="tabpanel" tabindex="0" aria-labelledby="tab-${tab}"></div>`;
   get('back').addEventListener('click', resetReport);
   get('download').addEventListener('click', downloadReport);
+  get('edit-report').addEventListener('click', openEditor);
   const keys = Object.keys(tabs);
   for (const [index, key] of keys.entries()) {
     const button = get('tab-' + key);
@@ -331,6 +411,7 @@ function overview(result, analysis) {
   const suggestions = result.improvements.map(check => `<li><div class="suggestion-title"><h3>${escape(check.title)}</h3>
     <span>+${check.max - check.points} pts</span></div><p>${escape(check.advice)}</p>${check.evidence ? `<small>${escape(check.evidence)}</small>` : ''}</li>`).join('');
   const profile = current.resume.profile;
+  const feedback = current.feedback;
   const roles = profile.entries.filter(item => item.kind === 'experience').length;
   const summary = current.resume.sections.filter(section => section.key === 'summary').flatMap(section => section.lines).join(' ');
   return `<section class="card profile-overview" aria-label="Profile overview">
@@ -347,6 +428,9 @@ function overview(result, analysis) {
     </section><section class="card report-card"><h2>What to improve</h2>
     <p class="muted">Ordered by potential points in this scan.</p>
     ${suggestions ? `<ol class="suggestions">${suggestions}</ol>` : '<p>Every check earned full points in this scan.</p>'}</section></div>
+  ${feedback.length ? `<section class="card report-card ai-improvements"><h2>Edits to work on</h2><p class="muted">Specific passages to review in your resume.</p><ul class="feedback-list">
+    ${feedback.map(item => `<li><div class="suggestion-title"><h3>${escape(item.title)}</h3><span>${escape(item.priority)} priority</span></div>
+    <p class="feedback-section">${escape(sectionTitles[item.section] || item.section)}</p><blockquote>${escape(item.evidence)}</blockquote><p>${escape(item.detail)}</p></li>`).join('')}</ul></section>` : ''}
   ${profile.issues.length ? `<section class="card report-card ai-improvements"><h2>Profile checks</h2><ul class="suggestions">
     ${profile.issues.map(item => `<li><h3>${escape(item.title)}</h3><p>${escape(item.detail)}</p><small>${escape(item.evidence)}</small></li>`).join('')}</ul></section>` : ''}
   ${analysis?.improvements.length ? `<section class="card report-card ai-improvements"><h2>AI editing suggestions</h2>
@@ -380,7 +464,7 @@ function parsed(resume, analysis) {
     return `<div><dt>${title}</dt><dd>${values.some(Boolean) ? values.map(escape).join('<br>') : '<span class="muted">Not detected</span>'}</dd></div>`;
   };
   return `<div class="report-grid parsed-grid"><div class="parsed-sections">
-    <section class="card report-card"><h2>Contact details</h2><dl class="fields">
+    <section class="card report-card"><div class="section-heading"><h2>Contact details</h2><button class="secondary" type="button" id="download-json">${icon('download')} Profile JSON</button></div><dl class="fields">
       ${field('Name', contact.name)}${field('Title', contact.title)}${field('Email', contact.email)}${field('Phone', contact.phone)}
       ${field('Location', contact.location)}${field('Links', contact.links)}</dl></section>
     ${header.length ? `<section class="card report-card"><h2>Resume header</h2><ul class="section-lines">${header.map(line => `<li>${escape(line)}</li>`).join('')}</ul></section>` : ''}
@@ -402,7 +486,7 @@ function modelMatches(ml) {
   const limited = ml.evidenceCount < ml.totalEvidence || ml.requirementCount < ml.totalRequirements;
   return `<section class="card report-card model-matches"><div class="section-heading"><h2>Related experience</h2><span class="optional">${escape(ml.model)} · Local ML</span></div>
     <p class="muted">Review these passages alongside each requirement. A similarity value measures closeness in meaning. Confirm tools, credentials, and duration against the source.</p>
-    <p class="model-coverage">Compared ${ml.requirementCount} job passages with ${ml.evidenceCount} resume passages.${limited ? ` The documents contain ${ml.totalRequirements} and ${ml.totalEvidence} passages respectively. Only the first passages within the model limit were compared.` : ''}</p>
+    <p class="model-coverage">Compared ${ml.requirementCount} job passages with ${ml.evidenceCount} resume passages.${limited ? ` The documents contain ${ml.totalRequirements} and ${ml.totalEvidence} eligible passages respectively. Resume passages are sampled across sections and job passages use the first eligible text within the model limit.` : ''}</p>
     <ul class="model-list">${ml.matches.map(match => `<li><h3>${escape(match.requirement)}</h3>${match.evidence.length ? match.evidence.map(item =>
       `<div class="model-evidence"><div><span>${escape(sectionTitles[item.section] || item.section)}</span><span>Similarity ${item.similarity.toFixed(2)}</span></div><blockquote>${escape(item.text)}</blockquote></div>`).join('') : '<p class="muted">No related passage met the retrieval threshold.</p>'}</li>`).join('')}</ul>
     <details class="model-method"><summary>About this model ${icon('chevron-down')}</summary><p>MiniLM-L6-v2 compares English text using sentence embeddings. Results below cosine similarity 0.35 are omitted. This threshold has not been calibrated on hiring outcomes. These suggestions earn no score points.</p>
@@ -430,6 +514,14 @@ function keywordComparison(result) {
 function renderPanel() {
   const { result, resume, analysis } = current;
   get('panel').innerHTML = { overview, parsed, keywords }[tab](tab === 'parsed' ? resume : result, analysis);
+  get('download-json')?.addEventListener('click', () => {
+    const profile = { schemaVersion: 1, filename: resume.metadata.fileName, revision: current.revision,
+      textSource: resume.metadata.textEdited ? 'edited' : 'file-extraction',
+      contact: resume.contact, profile: resume.profile, score: result, feedback: current.feedback,
+      aiAnalysis: analysis || null, relatedEvidence: current.ml || null,
+      jobDescription: current.settings.job, analyzedText: resume.extractedText };
+    downloadFile('shortlist-profile.json', JSON.stringify(profile, null, 2), 'application/json');
+  });
   get('copy')?.addEventListener('click', async () => {
     const button = get('copy');
     try {
@@ -461,6 +553,10 @@ function downloadReport() {
       `${category.title}: ${category.points}/${category.max}`,
       ...category.checks.map(check => `  ${check.title}: ${check.points}/${check.max}`),
     ]), '', 'Improvements', ...result.improvements.map(check => `- ${check.title} (+${check.max - check.points}): ${check.advice}`)];
+  lines.splice(3, 0, 'Text source: ' + (resume.metadata.textEdited ? 'Edited text' : 'File extraction'), 'Revision: ' + current.revision);
+  if (current.previous) lines.push('', `Previous score: ${current.previous.score}/100`,
+    current.previous.jobChanged ? 'Job description changed for this revision.' : 'The job description is the same as the previous revision.');
+  if (current.feedback.length) lines.push('', 'Edits to work on', ...current.feedback.map(item => `- ${item.title}\n  Source: ${item.evidence}\n  ${item.detail}`));
   if (result.keywords.total) {
     lines.push('', 'Matched keywords: ' + result.keywords.matched.map(term => term.label).join(', '),
       'Missing keywords: ' + result.keywords.missing.map(term => term.label).join(', '));
@@ -484,7 +580,7 @@ function downloadReport() {
   const warnings = [aiNote, mlNote, resume.metadata.layoutWarning, ...(resume.metadata.warnings || [])].filter(Boolean);
   if (resume.metadata.ocrPages) warnings.unshift('English OCR applied. Verify the extracted text against the original.');
   if (warnings.length) lines.push('', 'Extraction notes', ...warnings);
-  lines.push('', 'Extracted text', resume.extractedText.replace(/\f/g, '\n'));
+  lines.push('', resume.metadata.textEdited ? 'Analyzed text (edited)' : 'Extracted text', resume.extractedText.replace(/\f/g, '\n'));
   downloadFile('shortlist-resume-report.txt', lines.join('\n'), 'text/plain');
 }
 

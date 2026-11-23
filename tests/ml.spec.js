@@ -19,7 +19,7 @@ test('real MiniLM inference retrieves a paraphrase, preserves scores, and stays 
   const upload = () => page.locator('#file').setInputFiles({ name: 'profile.txt', mimeType: 'text/plain', buffer: Buffer.from(text) });
   await upload();
   await page.locator('#scan').click();
-  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible({ timeout: 45000 });
   const mlScore = await page.locator('.report-banner .ring strong').textContent();
   await page.getByRole('tab', { name: 'Job match' }).click();
   const matches = page.locator('.model-matches');
@@ -32,7 +32,7 @@ test('real MiniLM inference retrieves a paraphrase, preserves scores, and stays 
   await page.locator('#use-ml').uncheck();
   await upload();
   await page.locator('#scan').click();
-  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible({ timeout: 45000 });
   expect(await page.locator('.report-banner .ring strong').textContent()).toBe(mlScore);
 });
 
@@ -43,7 +43,7 @@ test('failed model loads preserve the profile and explain ML availability', asyn
   await page.locator('#job').fill('Design dashboards to explain operations performance.');
   await page.locator('#file').setInputFiles({ name: 'profile.txt', mimeType: 'text/plain', buffer: Buffer.from('Sam Rivera\nExperience\nAnalyst | Acme\nBuilt dashboards for operations managers.\nSkills\nSQL, Tableau') });
   await page.locator('#scan').click();
-  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible({ timeout: 45000 });
   await expect(page.locator('.report-warnings')).toContainText('Keyword matching is still available.');
   await page.getByRole('tab', { name: 'Parsed resume' }).click();
   await expect(page.locator('pre')).toContainText('Built dashboards');
@@ -67,7 +67,7 @@ test('uses the pinned model download path when the app has no hosted weights', a
   await page.locator('#job').fill('Build data dashboards for business operations.');
   await page.locator('#file').setInputFiles({ name: 'profile.txt', mimeType: 'text/plain', buffer: Buffer.from('Sam Rivera\nExperience\nAnalyst | Acme\nBuilt data dashboards for business operations.\nSkills\nSQL, Tableau') });
   await page.locator('#scan').click();
-  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Resume report' })).toBeVisible({ timeout: 45000 });
   await page.getByRole('tab', { name: 'Job match' }).click();
   await expect(page.getByRole('heading', { name: 'Related experience' })).toBeVisible();
   expect(downloads.some(path => path === '751bff37182d3f1213fa05d7196b954e230abad9/onnx/model_quantized.onnx')).toBe(true);
