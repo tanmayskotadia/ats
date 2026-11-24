@@ -1,20 +1,24 @@
 import { cleanText } from './resume.ts';
 import type { ResumeSection, SectionKey } from './resume.ts';
 import { retrievalLimits } from './ml-config.ts';
+import { compileQualifierCheck } from './ml-qualifiers.ts';
+import { compileWorkOwnershipCheck } from './ml-ownership.ts';
 import { isPositiveSkill } from './profile.ts';
+import type { EvidenceFinding } from './ml-review.ts';
 
 export interface MatchableResume {
   sections: readonly (Pick<ResumeSection, 'key' | 'lines'> & Partial<Pick<ResumeSection, 'label'>>)[];
 }
 
-interface EvidencePassage {
+export interface EvidencePassage {
   text: string;
   section: SectionKey;
+  source?: { heading: string; line: number };
 }
 
 interface MatchPassages {
   evidence: EvidencePassage[];
-  requirements: { text: string }[];
+  requirements: { text: string; candidateLimit?: number; checkOwnership?: boolean }[];
 }
 
 interface ModelInput extends MatchPassages {
@@ -31,7 +35,8 @@ export interface MLResult {
   model: string;
   revision: string;
   reranker?: { model: string; revision: string };
-  matches: ModelMatch[];
+  rerankerUnavailable?: true;
+  matches: EvidenceFinding[];
   evidenceCount: number;
   requirementCount: number;
   totalEvidence: number;
@@ -104,7 +109,7 @@ function jobPassages(job: string) {
     }
     if (section === 'excluded') continue;
     const list = skillList.test(label) ? line.slice(line.search(/[:：]/) + 1).split(/[,;|]/).map(item => item.trim()) : [];
-    const simpleList = list.length > 1 && list.every(item => item && item.length <= 45 &&
+    const simpleList = list.length > 1 && !/\b(?:or|any of|one of|either|equivalent)\b/i.test(label) && list.every(item => item && item.length <= 45 &&
       !/[()[\]]/.test(item) && !explicitRequirement.test(item));
     for (const passage of simpleList ? list : line.split(sentenceBoundary)) {
       const candidate = cleanText(passage);
@@ -146,8 +151,8 @@ function sampleEvidence(evidence: EvidencePassage[], limit: number) {
 function resumePassages(resume: MatchableResume) {
   return distinct(resume.sections.filter(section =>
     !excludedSections.has(section.key) && !referenceLabel.test(section.label ?? '')
-  ).flatMap(({ key, lines }) => lines.flatMap(line =>
-    line.split(sentenceBoundary).flatMap(sentence => sentence.split(/,?\s+(?:but|however|whereas),?\s+/i)).flatMap(part => {
+  ).flatMap(({ key, label, lines }) => lines.flatMap((line, index) =>
+    evidenceClauses(line, key).flatMap(part => {
       const text = part.replace(leadingMarker, '').trim();
       const assertion = cleanText(text);
       const compact = compactEvidenceSections.has(key);
@@ -155,9 +160,16 @@ function resumePassages(resume: MatchableResume) {
         !isPositiveSkill(assertion) || deniedEvidence.test(assertion) || prospectiveEvidence.test(assertion) ||
         copiedRequirement.test(assertion) ||
         ((key === 'education' || key === 'certifications') && incompleteCredential.test(assertion))) return [];
-      return chunks(text).map(text => ({ text, section: key }));
+      return chunks(text).map(text => ({ text, section: key, ...(label && { source: { heading: label, line: index + 1 } }) }));
     })
   )));
+}
+
+function evidenceClauses(line: string, section: SectionKey) {
+  // A short credential can name the award and give its validity in separate sentences.
+  if (section === 'certifications' && line.length <= retrievalLimits.chunkCharacters &&
+      !deniedEvidence.test(line) && !prospectiveEvidence.test(line) && !incompleteCredential.test(line)) return [line];
+  return line.split(sentenceBoundary).flatMap(sentence => sentence.split(/,?\s+(?:but|however|whereas),?\s+/i));
 }
 
 export function prepareMatches(resume: MatchableResume, job: string): ModelInput {
@@ -187,13 +199,17 @@ export function cosine(first: ArrayLike<number>, second: ArrayLike<number>) {
 
 export function retrieveCandidates(input: MatchPassages, vectors: readonly ArrayLike<number>[], limit = retrievalLimits.candidates): ModelMatch[] {
   if (vectors.length !== input.requirements.length + input.evidence.length) throw new Error('Incomplete model output.');
-  return input.requirements.map((requirement, index) => ({
-    requirement: requirement.text,
-    evidence: input.evidence.map((item, evidenceIndex) => ({
-      ...item,
-      similarity: cosine(vectors[index], vectors[input.requirements.length + evidenceIndex]),
-    })).sort((first, second) => second.similarity - first.similarity).slice(0, limit),
-  }));
+  return input.requirements.map(({ text, candidateLimit, checkOwnership }, index) => {
+    const allows = compileQualifierCheck(text);
+    const ownsWork = checkOwnership ? compileWorkOwnershipCheck(text) : undefined;
+    const evidence = input.evidence.flatMap((item, evidenceIndex) => {
+      if (allows && !allows(item.text, item.section)) return [];
+      if (ownsWork && !ownsWork(item.text, item.section)) return [];
+      return [{ ...item, similarity: cosine(vectors[index], vectors[input.requirements.length + evidenceIndex]) }];
+    });
+    evidence.sort((first, second) => second.similarity - first.similarity);
+    return { requirement: text, evidence: evidence.slice(0, candidateLimit ?? limit) };
+  });
 }
 
 export function selectMatches(candidates: ModelMatch[], scores?: readonly number[]): ModelMatch[] {

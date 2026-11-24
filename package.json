@@ -13,7 +13,8 @@
     "prebuild": "node --experimental-strip-types scripts/prepare-assets.ts",
     "start": "node --experimental-strip-types --env-file-if-exists=.env server/index.ts",
     "models:download": "node --experimental-strip-types scripts/download-model.ts",
-    "models:benchmark": "node --experimental-strip-types scripts/benchmark-model.ts"
+    "models:benchmark": "node --experimental-strip-types scripts/benchmark-model.ts",
+    "models:audit": "node --experimental-strip-types scripts/audit-evidence.ts"
   },
   "repository": {
     "type": "git",

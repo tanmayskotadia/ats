@@ -76,6 +76,14 @@ test('explicit criteria preserve short technical names, credential levels and me
   ]);
   assert.ok(requirements.every(item => job.includes(item.text)));
   assert.deepEqual(prepareMatches({ sections: [] }, '.NET').requirements, [{ text: '.NET' }]);
+  const alternatives = 'Required skills: Oracle, PostgreSQL, or comparable database experience';
+  assert.deepEqual(prepareMatches({ sections: [] }, alternatives).requirements, [{ text: alternatives }]);
+});
+
+test('keeps the credential and its current-status sentence together', () => {
+  const line = 'Project Management Professional, awarded by PMI. Credential renewed and currently active.';
+  const { evidence } = prepareMatches({ sections: [{ key: 'certifications', lines: [line] }] }, 'Active PMP certification');
+  assert.deepEqual(evidence, [{ text: line, section: 'certifications' }]);
 });
 
 test('resume retrieval omits denied, prospective, and copied claims while keeping positive source clauses', () => {
@@ -163,6 +171,18 @@ test('shortlists by cosine similarity and filters weak embedding-only matches', 
   assert.throws(() => retrieveCandidates(input, [[1, 0]]), /Incomplete/);
   assert.throws(() => cosine([1], [1, 0]), /dimensions/);
   assert.throws(() => cosine([NaN], [1]), /Invalid/);
+});
+
+test('checks an explicitly named tool before taking the closest passages', () => {
+  const input = {
+    requirements: [{ text: 'Experience with PostgreSQL' }],
+    evidence: [
+      { text: 'Implemented audit queries for MySQL.', section: 'experience' },
+      { text: 'Migrated reporting jobs to Postgres.', section: 'experience' },
+    ],
+  } satisfies Parameters<typeof retrieveCandidates>[0];
+  const [match] = retrieveCandidates(input, [[1, 0], [1, 0], [0.8, 0.2]], 1);
+  assert.deepEqual(match.evidence.map(passage => passage.text), ['Migrated reporting jobs to Postgres.']);
 });
 
 test('reranks each criterion independently and withholds candidates below the relevance cutoff', () => {

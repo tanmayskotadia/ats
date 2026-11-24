@@ -14,7 +14,7 @@ export interface EmbeddingArtifact extends ModelArtifact {
   queryPrefix: string;
 }
 
-export const embeddingModel: EmbeddingArtifact = {
+export const baselineEmbeddingModel: EmbeddingArtifact = {
   id: 'Xenova/bge-base-en-v1.5',
   revision: '2e0d90d9066a78297ae13c032b05699b42a9cc17',
   folder: 'bge-base',
@@ -23,6 +23,19 @@ export const embeddingModel: EmbeddingArtifact = {
   weights: 'onnx/model_int8.onnx',
   sha256: 'b83dfe249580ff1c2d0dcebe61ee565b1f6dcd5c2469632773d4508b9efd0889',
   card: 'https://huggingface.co/BAAI/bge-base-en-v1.5',
+  pooling: 'cls',
+  queryPrefix: 'Represent this sentence for searching relevant passages: ',
+};
+
+export const embeddingModel: EmbeddingArtifact = {
+  id: 'Xenova/bge-large-en-v1.5',
+  revision: 'dfeef6070b90658e1b391a6940efdb0925c1de6f',
+  folder: 'bge-large',
+  name: 'BGE Large v1.5',
+  dtype: 'int8',
+  weights: 'onnx/model_int8.onnx',
+  sha256: '81862c1d889c334792a0e71b9d7eb6687a623acadfc81875c9590141996abf0d',
+  card: 'https://huggingface.co/BAAI/bge-large-en-v1.5',
   pooling: 'cls',
   queryPrefix: 'Represent this sentence for searching relevant passages: ',
 };
@@ -54,6 +67,6 @@ export const baselineModel: EmbeddingArtifact = {
 export type { ModelArtifact };
 
 export const retrievalLimits = {
-  resumeChunks: 160, jobChunks: 36, chunkCharacters: 420, candidates: 6,
+  resumeChunks: 160, jobChunks: 36, chunkCharacters: 420, candidates: 8, candidatesPerPart: 4,
   minimumEntailment: 0.5, minimumSimilarity: 0.6,
 };

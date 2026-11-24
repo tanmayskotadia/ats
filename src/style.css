@@ -255,6 +255,11 @@ dialog dd { margin: 0; font-weight: 700; white-space: nowrap; }
 .model-list { padding: 0; margin: 14px 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .model-list > li { border: 1px solid var(--glass-edge); padding: 14px; border-radius: 12px; background: var(--glass-inset); }
 .model-list h3 { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.model-status { display: inline-block; margin-bottom: 6px; font-size: 11px; font-weight: 750; color: var(--muted); }
+.model-status[data-status="supported"] { color: var(--accent-dark); }
+.model-parts { display: grid; gap: 10px; padding: 0; margin: 9px 0 0; list-style: none; }
+.model-parts > li { padding-top: 9px; border-top: 1px solid var(--line); }
+.model-parts h4 { margin: 0 0 3px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .model-evidence { background: var(--glass-inset); border-radius: 8px; padding: 10px; margin-top: 9px; }
 .model-evidence > div { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; font-weight: 650; color: var(--accent-dark); }
 .model-evidence blockquote { margin: 7px 0 0; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }

@@ -5,6 +5,7 @@ import { loadEmbedder, loadReranker } from './ml-inference.ts';
 import type { ModelLocation } from './ml-inference.ts';
 import { retrieveCandidates, selectMatches } from './ml-match.ts';
 import type { ModelRequest, ModelResponse } from './ml-match.ts';
+import { assembleEvidenceFindings, planEvidenceReview } from './ml-review.ts';
 import type { ProgressCallback } from './resume.ts';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -14,7 +15,7 @@ const models = new URL('models/', appBase);
 env.localModelPath = models.pathname;
 const wasm = env.backends.onnx.wasm;
 if (!wasm) throw new Error('The ONNX WebAssembly backend is unavailable.');
-wasm.numThreads = 1;
+wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, self.navigator.hardwareConcurrency || 1)) : 1;
 wasm.proxy = false;
 const runtime = new URL('ml-runtime/', appBase);
 wasm.wasmPaths = {
@@ -66,7 +67,8 @@ self.onmessage = async (event: MessageEvent<ModelRequest>) => {
       .then(location => loadEmbedder(location, embeddingModel))
       .catch(error => { embedder = undefined; throw error; }));
 
-    const queries = input.requirements.map(requirement => requirement.text);
+    const review = planEvidenceReview(input.requirements);
+    const queries = review.checks.map(requirement => requirement.text);
     const queryKey = JSON.stringify(queries);
     if (lastQueries?.key !== queryKey) {
       const vectors: Float32Array[] = [];
@@ -83,27 +85,31 @@ self.onmessage = async (event: MessageEvent<ModelRequest>) => {
       vectors.push(...await encoder.embed(passages.slice(index, index + 4)));
     }
 
-    const candidates = retrieveCandidates(input, vectors);
-    let matches;
+    const candidates = retrieveCandidates({ requirements: review.checks, evidence: input.evidence }, vectors);
+    const pairs = candidates.flatMap(match => match.evidence.map(item => ({ query: match.requirement, passage: item.text })));
+    let matches = selectMatches(candidates);
     let secondModel;
-    try {
-      progress(`Loading ${rerankingModel.name}…`);
-      const ranker = await (reranker ??= locateModel(rerankingModel, progress)
-        .then(loadReranker).catch(error => { reranker = undefined; throw error; }));
-      const pairs = candidates.flatMap(match => match.evidence.map(item => ({ query: match.requirement, passage: item.text })));
-      const scores: number[] = [];
-      for (let index = 0; index < pairs.length; index += 8) {
-        progress(`Reranking related evidence… ${Math.round(100 * index / pairs.length)}%`);
-        scores.push(...await ranker.score(pairs.slice(index, index + 8)));
+    let rerankerUnavailable: true | undefined;
+    if (pairs.length) {
+      try {
+        progress(`Loading ${rerankingModel.name}…`);
+        const ranker = await (reranker ??= locateModel(rerankingModel, progress)
+          .then(loadReranker).catch(error => { reranker = undefined; throw error; }));
+        const scores: number[] = [];
+        for (let index = 0; index < pairs.length; index += 4) {
+          progress(`Checking evidence against job criteria… ${Math.round(100 * index / pairs.length)}%`);
+          scores.push(...await ranker.score(pairs.slice(index, index + 4)));
+        }
+        matches = selectMatches(candidates, scores);
+        secondModel = { model: rerankingModel.name, revision: rerankingModel.revision };
+      } catch {
+        rerankerUnavailable = true;
       }
-      matches = selectMatches(candidates, scores);
-      secondModel = { model: rerankingModel.name, revision: rerankingModel.revision };
-    } catch {
-      matches = selectMatches(candidates);
     }
 
     self.postMessage({ id, result: {
-      model: embeddingModel.name, revision: embeddingModel.revision, reranker: secondModel, matches,
+      model: embeddingModel.name, revision: embeddingModel.revision, reranker: secondModel, rerankerUnavailable,
+      matches: assembleEvidenceFindings(review, matches, Boolean(secondModel)),
       evidenceCount: input.evidence.length, requirementCount: input.requirements.length,
       totalEvidence: input.totalEvidence, totalRequirements: input.totalRequirements,
     } } satisfies ModelResponse);

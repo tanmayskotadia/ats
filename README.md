@@ -26,7 +26,7 @@ Groq takes priority when both keys are set. Leave both keys empty to disable AI-
 
 ## Local ML and profile reading
 
-**Local ML evidence search** uses BGE Base v1.5 to shortlist resume passages and DeBERTa-v3 to check how closely each passage supports the job criterion. Both pretrained English models run in a browser worker with ONNX Runtime. Enable the checkbox and add a job description to use them. No API key or Python service is required.
+**Local ML evidence search** uses BGE Large v1.5 to shortlist resume passages and DeBERTa-v3 NLI to check how closely each passage supports the job criterion. Both pretrained English models run in a browser worker with ONNX Runtime. Enable the checkbox and add a job description to use them. No API key or Python service is required.
 
 To serve the pinned model files from your app, download them before starting or building.
 
@@ -35,13 +35,14 @@ npm run models:download
 npm run dev
 ```
 
-The two models and their tokenizers take about 210 MB, plus the browser ML runtime. When files are missing from the app host, the browser downloads the pinned assets from Hugging Face and caches them where supported. Resume and job text stay in the browser during local inference. `public/models/` and generated runtime assets are ignored by Git. Run the download command before the production build to include the weights in `dist/`.
+The two models and their tokenizers take about 436 MB, plus the browser ML runtime. When files are missing from the app host, the browser downloads the pinned assets from Hugging Face and caches them where supported. Resume and job text stay in the browser during local inference. `public/models/` and generated runtime assets are ignored by Git. Run the download command before the production build to include the weights in `dist/`.
 
 - Profiles group employment, education, projects, and credentials with their source lines. Skills are detected in both the Skills section and role descriptions, including common aliases.
 - Employment duration uses the union of explicit month ranges, so overlapping roles count once. Year-only, missing, reversed, and future dates are flagged. The month total is an estimate from calendar months and includes internships that appear under Experience.
 - ML compares up to 36 job criteria against 160 resume passages, with a 420-character limit per chunk and a 192-token model input limit. An app tab handles one ML scan at a time and reuses loaded models and job embeddings across a batch.
 - Criterion extraction skips company and benefits sections and preserves concise tools, credentials, and experience requirements. Passage selection filters clearly negated or prospective statements and samples across resume sections when coverage is limited.
-- BGE shortlists up to six passages per criterion. DeBERTa compares each shortlisted passage with the requirement and the report shows up to two that pass its relevance cutoff. Review exact tools, credentials, durations, and responsibilities against the source. These suggestions earn no ATS score points.
+- For certain explicit qualifications, the shortlist requires an excerpt that names the specified tool or credential and supports its stated duration or status. For clear duties, review also screens for passages that explicitly assign the work or approval to someone else.
+- BGE shortlists up to eight passages per criterion. Clear compound duties and alternatives are checked separately with up to four candidates per part. DeBERTa reviews the candidates, and the report displays exact excerpts with their parsed section and line when available. It distinguishes supporting evidence, partial evidence, empty checks, and embedding-only related passages. These suggestions earn no ATS score points.
 - If DeBERTa is unavailable, the related-experience view uses BGE similarity and identifies the fallback. If the encoder fails or the scan times out, the profile, scoring, and keyword report remain available.
 
 ## Parsing and scoring
@@ -100,11 +101,14 @@ npm run test:browser
 
 The automated AI tests use controlled provider responses to exercise the request contract, grounding, quota handling, and report UI without a billed API call. With the local files installed, browser tests run real BGE and DeBERTa inference on the app origin and check that ML leaves the ATS score unchanged. Local profile and scoring regression tests cover overlaps, uncertain dates, negation, aliases, duplicate bullets, and unsupported credentials.
 
-To compare ranking and false positives with the previous MiniLM model, run the offline benchmark against the manually labeled synthetic requirements and resume excerpts.
+To compare ranking and false positives with MiniLM and the prior BGE Base and DeBERTa-v3 pipeline, run the offline benchmark. It reports results on two separate sets of manually labeled synthetic requirements and resume excerpts.
 
 ```sh
 npm run models:download -- --baseline
 npm run models:benchmark
+npm run models:audit
 ```
 
-Model references include the [BGE Base v1.5 model card](https://huggingface.co/BAAI/bge-base-en-v1.5) and the [DeBERTa-v3 NLI model card](https://huggingface.co/cross-encoder/nli-deberta-v3-xsmall).
+The audit compares whole-criterion and per-duty review on synthetic requirements with labeled source excerpts, including partial and delegated work.
+
+Model references include the [BGE Large v1.5 model card](https://huggingface.co/BAAI/bge-large-en-v1.5) and the [DeBERTa-v3 NLI model card](https://huggingface.co/cross-encoder/nli-deberta-v3-xsmall).

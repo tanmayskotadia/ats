@@ -7,6 +7,7 @@ import { embeddingModel, rerankingModel } from './ml-config.ts';
 import { maxFiles, maxResumeTextCharacters, runQueue, scanFile, reviseScan } from './scan.ts';
 import type { ScanReport, ScanSettings } from './scan.ts';
 import type { ScoreResult } from './score.ts';
+import type { ModelMatch } from './ml-match.ts';
 
 interface UploadRecord {
   file: File;
@@ -93,7 +94,7 @@ get('app').innerHTML = `
           </details>
           <label class="ai-setting"><input id="use-ml" type="checkbox" aria-describedby="ml-description">
             <span><strong>${icon('sparkles')} Local ML evidence search</strong>
-            <small id="ml-description">Find related experience for a job description using two models in your browser. First use downloads about 210 MB of model files.</small></span>
+            <small id="ml-description">Find and check resume evidence for a job description in your browser. First use can download about 436 MB of model files.</small></span>
           </label>
           <label class="ai-setting"><input id="use-ai" type="checkbox" disabled aria-labelledby="ai-title" aria-describedby="ai-description">
             <span><strong id="ai-title">${icon('sparkles')} AI-assisted parsing</strong>
@@ -535,15 +536,31 @@ function keywords({ result, ml }: ScanReport) {
   return keywordComparison(result) + modelMatches(ml);
 }
 
+const reviewLabels = {
+  supported: 'Evidence found', partial: 'Partial evidence', absent: 'No supporting evidence', related: 'Related passages',
+};
+
+function evidenceExcerpts(evidence: ModelMatch['evidence']) {
+  if (!evidence.length) return '<p class="muted">No passage met the evidence checks.</p>';
+  return evidence.map(item => {
+    const section = item.source?.heading || sectionTitles[item.section] || item.section;
+    const source = item.source ? `${section} · section line ${item.source.line}` : section;
+    return `<div class="model-evidence"><div><span>${escape(source)}</span></div><blockquote>${escape(item.text)}</blockquote></div>`;
+  }).join('');
+}
+
 function modelMatches(ml: ScanReport['ml']) {
   if (!ml) return '';
   const limited = ml.evidenceCount < ml.totalEvidence || ml.requirementCount < ml.totalRequirements;
+  const method = ml.reranker ? `The ${escape(ml.reranker.model)} checks shortlisted passages against each job criterion.` :
+    ml.rerankerUnavailable ? 'The reranker was unavailable, so these results use embedding similarity.' : 'The qualification checks left no passages to rerank.';
   return `<section class="card report-card model-matches"><div class="section-heading"><h2>Related experience</h2><span class="optional">${escape(ml.model)} · Local ML</span></div>
-    <p class="muted">Review these passages alongside each requirement. Confirm tools, credentials, and duration against the source.</p>
+    <p class="muted">Review the resume excerpts for each requirement and see where evidence covers only part of a duty.</p>
     <p class="model-coverage">Compared ${ml.requirementCount}/${ml.totalRequirements} job passages with ${ml.evidenceCount}/${ml.totalEvidence} resume passages.${limited ? ' The analysis reached the passage limit.' : ''}</p>
-    <ul class="model-list">${ml.matches.map(match => `<li><h3>${escape(match.requirement)}</h3>${match.evidence.length ? match.evidence.map(item =>
-      `<div class="model-evidence"><div><span>${escape(sectionTitles[item.section] || item.section)}</span></div><blockquote>${escape(item.text)}</blockquote></div>`).join('') : '<p class="muted">No related passage met the relevance cutoff.</p>'}</li>`).join('')}</ul>
-    <details class="model-method"><summary>About local evidence search ${icon('chevron-down')}</summary><p>${escape(ml.model)} retrieves related English passages. ${ml.reranker ? `The ${escape(ml.reranker.model)} reads each shortlisted passage alongside the job criterion and ranks them for review.` : 'The reranker was unavailable, so these results use embedding similarity.'} These suggestions earn no score points.</p>
+    <ul class="model-list">${ml.matches.map(match => `<li><span class="model-status" data-status="${match.status}">${reviewLabels[match.status]}</span>
+      <h3>${escape(match.requirement)}</h3>${match.alternatives ? '<p class="muted">Either option can meet this requirement.</p>' : ''}${match.parts ? `<ul class="model-parts">${match.parts.map(part => `<li>
+        <h4>${escape(part.requirement)}</h4>${evidenceExcerpts(part.evidence)}</li>`).join('')}</ul>` : evidenceExcerpts(match.evidence)}</li>`).join('')}</ul>
+    <details class="model-method"><summary>About local evidence search ${icon('chevron-down')}</summary><p>${escape(ml.model)} retrieves related English passages. ${method} These suggestions earn no score points.</p>
       <a href="${embeddingModel.card}" target="_blank" rel="noreferrer">BGE model card ${icon('arrow-up-right')}</a>
       ${ml.reranker ? `<a href="${rerankingModel.card}" target="_blank" rel="noreferrer">Reranker model card ${icon('arrow-up-right')}</a>` : ''}</details>
   </section>`;
@@ -639,10 +656,16 @@ function downloadReport() {
       `- ${item.kind}: ${[item.title, item.organization, item.dates].filter(Boolean).join(' · ')}\n  Source: ${item.evidence.join(' | ')}`));
   if (ml) {
     lines.push('', `Related experience (${ml.model}, revision ${ml.revision})`,
-      ...(ml.reranker ? [`Reranked with ${ml.reranker.model}, revision ${ml.reranker.revision}`] : ['Embedding search only. The reranker was unavailable.']),
+      ...(ml.reranker ? [`Reranked with ${ml.reranker.model}, revision ${ml.reranker.revision}`] :
+        ml.rerankerUnavailable ? ['Embedding search only. The reranker was unavailable.'] : []),
       `Compared ${ml.requirementCount}/${ml.totalRequirements} job passages and ${ml.evidenceCount}/${ml.totalEvidence} resume passages.`,
       'Model suggestions earn no score points.',
-      ...ml.matches.flatMap(match => [match.requirement, ...match.evidence.map(item => `  - ${item.text}`)]));
+      ...ml.matches.flatMap(match => [`${reviewLabels[match.status]} · ${match.requirement}`,
+        ...(match.alternatives ? ['  Either option can meet this requirement.'] : []),
+        ...(match.parts ?? [match]).flatMap(part => [
+          ...(match.parts ? [`  ${part.requirement}`] : []),
+          ...(part.evidence.length ? part.evidence.map(item => `    - ${item.text}`) : ['    No supporting excerpt found.']),
+        ])]));
   }
   const warnings = [aiNote, mlNote, resume.metadata.layoutWarning, ...(resume.metadata.warnings || [])].filter((value): value is string => Boolean(value));
   if (resume.metadata.ocrPages) warnings.unshift('English OCR applied. Verify the extracted text against the original.');

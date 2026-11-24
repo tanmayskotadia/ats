@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { Writable } from 'node:stream';
-import { baselineModel, embeddingModel, rerankingModel } from '../src/ml-config.ts';
+import { baselineEmbeddingModel, baselineModel, embeddingModel, rerankingModel } from '../src/ml-config.ts';
 import type { ModelArtifact } from '../src/ml-config.ts';
 
 const metadataFiles = ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json'];
@@ -81,6 +81,6 @@ async function installModel(model: ModelArtifact) {
 }
 
 const models = process.argv.includes('--baseline')
-  ? [embeddingModel, rerankingModel, baselineModel]
+  ? [embeddingModel, rerankingModel, baselineEmbeddingModel, baselineModel]
   : [embeddingModel, rerankingModel];
 for (const model of models) await installModel(model);

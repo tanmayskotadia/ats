@@ -228,3 +228,103 @@ export const retrievalCases: readonly RetrievalCase[] = [
     ],
   },
 ];
+
+// Separate cases for checking the selection on roles and requirements absent from the development set.
+export const holdoutCases: readonly RetrievalCase[] = [
+  {
+    id: 'python-development-duration',
+    query: 'At least five years of professional Python development experience.',
+    passages: [
+      passage('Developed production APIs for nine years, using Java for seven years and Python for the last two years.', 0),
+      passage('Used Python professionally for four years, maintaining data integrations and adding validation tests.', 0),
+      passage('Built and maintained Python libraries and web services at a payroll software company for six years.', 1),
+      passage('Managed a Python development team for six years. The engineers wrote and maintained the application code.', 0),
+      passage('Completed a five-year computer science program and wrote Python scripts for two assignments.', 0, 'education'),
+      passage('Developed production services for eight years in Ruby and migrated reporting tools to R.', 0),
+    ],
+  },
+  {
+    id: 'google-cloud-architect-certification',
+    query: 'Hold an active Google Cloud Professional Cloud Architect certification.',
+    passages: [
+      passage('Google Cloud Professional Cloud Architect certification expired. Renewal exam scheduled.', 0, 'certifications'),
+      passage('Google Cloud Professional Cloud Developer credential, currently active.', 0, 'certifications'),
+      passage('Certified as an AWS Solutions Architect Professional. Credential renewed and active.', 0, 'certifications'),
+      passage('Led architecture reviews for Google Cloud workloads and advised teams preparing for certification.', 0),
+      passage('Completed the Professional Cloud Architect study path and passed the practice assessments.', 0, 'education'),
+      passage('Verified active Google Cloud Professional Cloud Architect credentials for subcontractors.', 0),
+    ],
+  },
+  {
+    id: 'apache-flink-streaming',
+    query: 'Implement streaming data pipelines with Apache Flink.',
+    passages: [
+      passage('Wrote and deployed continuous Flink SQL jobs to aggregate incoming checkout events into minute-level sales totals.', 1),
+      passage('Maintained streaming data pipelines in Spark Structured Streaming and proposed evaluating Apache Flink.', 0),
+      passage('Monitored dashboards for the Apache Flink platform and escalated failed pipelines to data engineers.', 0),
+      passage('Implemented Kafka Streams applications to aggregate transaction topics and publish rolling totals.', 0),
+      passage('Built daily batch pipelines with Apache Airflow to ingest vendor files into a warehouse.', 0),
+      passage('Migrated data consumers from Spark to a Flink platform operated by another team and rewrote downstream reports from its tables.', 0),
+    ],
+  },
+  {
+    id: 'collective-bargaining-lead',
+    query: 'Draft collective bargaining agreements and lead negotiations with unions.',
+    passages: [
+      passage('Edited draft collective bargaining agreements and prepared financial exhibits for the HR director to use during negotiations.', 0),
+      passage('Ran negotiations over rates and contract language with suppliers and service agencies.', 0),
+      passage('Led discussions with union representatives to resolve grievances under an existing collective agreement.', 0),
+      passage('Wrote contract provisions and served as the employer’s chief negotiator in wage and work-rule talks with organized labor.', 1),
+      passage('Scheduled union bargaining sessions and recorded action items and draft amendments discussed at the table.', 0),
+      passage('Implemented provisions of collective agreements after counsel completed bargaining and workers ratified the contracts.', 0),
+    ],
+  },
+  {
+    id: 'bridge-calculation-signoff',
+    query: 'Approve and sign off structural calculations for bridge rehabilitation projects.',
+    passages: [
+      passage('Prepared structural calculations for bridge rehabilitation, with approvals and signatures provided by the lead engineer.', 0),
+      passage('Approved and signed structural calculations for renovations to low-rise commercial office buildings.', 0),
+      passage('Reviewed bridge retrofit calculations and forwarded unresolved loading assumptions for independent sign-off.', 0),
+      passage('Inspected expansion joints and documented rebar exposure for bridge rehabilitation cost estimates.', 0),
+      passage('Signed off road-closure plans and traffic management for crews working on bridge decks.', 0),
+      passage('Compiled structural calculation packages after approvals and filed signed records with the project administrator.', 0),
+    ],
+  },
+  {
+    id: 'cold-chain-loss',
+    query: 'Reduce perishable product loss by managing cold-chain temperatures across deliveries.',
+    passages: [
+      passage('Mapped delivery routes for refrigerated trucks to shorten travel time and reduce fuel costs.', 0),
+      passage('Analyzed spoilage losses in a warehouse and recommended staff training on stock rotation.', 0),
+      passage('Reviewed thermometer logs from chilled vehicles and corrected warm-load exceptions, cutting discarded produce by 13%.', 1),
+      passage('Installed temperature sensors in a dispatch facility and reported the readings to cold-chain operators.', 0),
+      passage('Reduced dry goods waste by introducing reorder triggers and sharing aging stock reports across stores.', 0),
+      passage('Investigated perishable product returns and credited retailers for damaged or late shipments.', 0),
+    ],
+  },
+  {
+    id: 'snowflake-administration-duration',
+    query: 'At least three years of hands-on production Snowflake administration.',
+    passages: [
+      passage('Administered production Snowflake warehouses and access roles for two years after four years managing PostgreSQL.', 0),
+      passage('Wrote queries and built sales dashboards against Snowflake for four years as a data analyst.', 0),
+      passage('Managed a production Snowflake environment for nine months and created alert policies and provisioning automation.', 0),
+      passage('Provided five years of production data warehouse administration using BigQuery and Redshift.', 0),
+      passage('Ran introductory Snowflake administration labs as part of a three-year cloud computing degree.', 0, 'education'),
+      passage('Supervised the Snowflake platform team for five years and delegated account setup and incident response to administrators.', 0),
+    ],
+  },
+  {
+    id: 'live-stage-lighting-cues',
+    query: 'Adapt stage lighting cues in real time when performances depart from the script.',
+    passages: [
+      passage('Designed lighting plots and preprogrammed cue changes for rehearsed scenes and scripted transitions.', 0),
+      passage('Operated the lighting desk during live theatre and retimed changes whenever performers skipped lines or extended a scene.', 1),
+      passage('Logged live deviations from the script and sent them to the technical director for the next rehearsal.', 0),
+      passage('Operated video and audio during improvised performances and communicated timing updates to the lighting operator.', 0),
+      passage('Changed scheduled lighting cues during rehearsals and restored the agreed cue sequence before the first performance.', 0),
+      passage('Adjusted stage lighting manually during evening concerts, following a fixed cue sheet for the opening and closing songs.', 0),
+    ],
+  },
+];

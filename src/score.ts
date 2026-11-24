@@ -76,7 +76,7 @@ function termPattern(term: string) {
   return new RegExp(`(?<![\\p{L}\\p{N}+#])${pattern}(?![\\p{L}\\p{N}+#])`, exactCase ? 'gu' : 'giu');
 }
 
-function termMatches(text: string, term: string) {
+export function termMatches(text: string, term: string) {
   return termPattern(term).test(text);
 }
 
@@ -185,7 +185,7 @@ const credentialFamilies = [
   /\bPMP\b/i, /\bCPA\b/i, /\bCFA\b/i, /\bRN\b/i,
 ];
 
-function durationMonths(text: string) {
+export function durationMonths(text: string) {
   return [...text.matchAll(/\b(?:(\d+(?:\.\d+)?)\s*(?:-|to)\s*)?(\d+(?:\.\d+)?)\+?\s*(years?|months?)\b/gi)]
     .map(match => Number(match[1] || match[2]) * (/^year/i.test(match[3]) ? 12 : 1));
 }
@@ -198,11 +198,13 @@ function durationForTerm(text: string, aliases: string[]) {
     .flatMap(durationMonths);
 }
 
-function cfaLevels(text: string) {
+export function cfaLevels(text: string) {
   const roman: Partial<Record<string, number>> = { i: 1, ii: 2, iii: 3 };
   return [...text.matchAll(/\bCFA\b[^.!?;\n]{0,30}?\blevel\s*(I{1,3}|[1-3])\b/gi)]
     .map(match => roman[match[1].toLowerCase()] || Number(match[1]));
 }
+
+export { catalog, namedTechnologies, credentialFamilies };
 
 function verifiedRequirements(resume: Resume, job: string, requirements: readonly JobRequirement[]): JobMatch[] {
   const source = evidenceForm(resume.text);

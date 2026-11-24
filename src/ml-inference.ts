@@ -1,6 +1,7 @@
 import { AutoModel, AutoModelForSequenceClassification, AutoTokenizer, FeatureExtractionPipeline } from '@huggingface/transformers';
 import type { PretrainedModelOptions } from '@huggingface/transformers';
 import type { EmbeddingArtifact } from './ml-config.ts';
+import { numericDurations } from './ml-qualifiers.ts';
 
 export interface ModelLocation {
   id: string;
@@ -42,8 +43,9 @@ function hypothesis(query: string) {
     .replace(/[.!?]+$/, '').trim();
   const credential = criterion.match(/^(?:hold |have )?(?:an? )?(?:(active|current|valid) )?(.+\b(?:certification|licen[cs]e|credential))$/i);
   if (credential) return `The applicant ${credential[1] ? 'currently ' : ''}holds ${credential[2]}.`;
-  const body = criterion.replace(/^[A-Z](?=[a-z])/, first => first.toLowerCase());
-  if (/^(?:experience (?:with|in|using)|knowledge of|proficiency (?:in|with)|\d+\s*\+?\s*(?:years?|months?)\b)/i.test(criterion)) {
+  const body = numericDurations(criterion).replace(/^[A-Z](?=[a-z])/, first => first.toLowerCase());
+  const duration = /^(?:(?:at least|more than|over|a minimum of|minimum)\s+)?\d+(?:\.\d+)?(?:\s*(?:[-–—]|to)\s*\d+(?:\.\d+)?)?\s*\+?\s*(?:years?|months?)\b/i;
+  if (duration.test(body) || /^(?:experience (?:with|in|using)|knowledge of|proficiency (?:in|with))\b/i.test(body)) {
     return `The applicant has ${body}.`;
   }
   if (!/\s/.test(criterion)) return `The applicant has experience with ${criterion}.`;
