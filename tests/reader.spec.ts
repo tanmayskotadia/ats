@@ -151,7 +151,7 @@ test('keeps completed reports when another file in the batch fails', async ({ pa
 });
 
 test('AI scans are opt-in and show structured entries, job evidence, and improvements', async ({ page }) => {
-  await page.route('**/api/status', route => route.fulfill({ json: { aiEnabled: true } }));
+  await page.route('**/api/status', route => route.fulfill({ json: { aiEnabled: true, aiProvider: 'groq' } }));
   const requests: unknown[] = [];
   await page.route('**/api/analyze', async route => {
     requests.push(route.request().postDataJSON());
@@ -166,7 +166,9 @@ test('AI scans are opt-in and show structured entries, job evidence, and improve
   const toggle = page.getByRole('checkbox', { name: 'AI-assisted parsing' });
   await expect(toggle).toBeEnabled();
   await expect(toggle).not.toBeChecked();
+  await expect(toggle).toHaveAccessibleDescription(/Send extracted resume and job text to Groq/);
   await toggle.check();
+  await page.locator('#use-ml').uncheck();
   await page.locator('#job-panel summary').click();
   await page.getByRole('textbox', { name: 'Job description' }).fill(sampleJob);
   await page.locator('#file').setInputFiles({ name: 'uploaded.txt', mimeType: 'text/plain', buffer: Buffer.from(sampleText) });
@@ -180,13 +182,36 @@ test('AI scans are opt-in and show structured entries, job evidence, and improve
   await expect(page.getByRole('heading', { name: /Supported requirements/ })).toBeVisible();
   const semanticMatch = page.locator('.keyword-list li').filter({ has: page.getByText('Data visualization', { exact: true }) });
   await expect(semanticMatch.getByText('Built Tableau dashboards', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit text and rescan' }).click();
+  const editToggle = page.getByRole('dialog').getByRole('checkbox', { name: 'AI-assisted parsing' });
+  await expect(editToggle).toBeChecked();
+  await expect(editToggle).toHaveAccessibleDescription(/Send edited resume and job text to Groq/);
 });
+
+for (const [provider, label] of [['openai', 'OpenAI'], ['unknown-provider', 'the configured AI provider']]) {
+  test(`AI consent identifies ${label} and stays off for local scans`, async ({ page }) => {
+    await page.route('**/api/status', route => route.fulfill({ json: { aiEnabled: true, aiProvider: provider } }));
+    await page.goto('/');
+    const toggle = page.getByRole('checkbox', { name: 'AI-assisted parsing' });
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toHaveAccessibleDescription(new RegExp(`Send extracted resume and job text to ${label}`));
+    await analyze(page, 'uploaded.txt', 'text/plain', Buffer.from(sampleText));
+    await page.getByRole('button', { name: 'Edit text and rescan' }).click();
+    const editToggle = page.getByRole('dialog').getByRole('checkbox', { name: 'AI-assisted parsing' });
+    await expect(editToggle).toBeEnabled();
+    await expect(editToggle).not.toBeChecked();
+    await expect(editToggle).toHaveAccessibleDescription(new RegExp(`Send edited resume and job text to ${label}`));
+  });
+}
 
 test('explains when AI fails and uses the local rubric', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: { aiEnabled: true } }));
   await page.route('**/api/analyze', route => route.fulfill({ status: 429, json: { error: 'AI scan limit reached.' } }));
   await page.goto('/');
-  await page.getByRole('checkbox', { name: 'AI-assisted parsing' }).check();
+  const toggle = page.getByRole('checkbox', { name: 'AI-assisted parsing' });
+  await expect(toggle).toHaveAccessibleDescription(/Send extracted resume and job text to the configured AI provider/);
+  await toggle.check();
   await analyze(page, 'uploaded.txt', 'text/plain', Buffer.from(sampleText));
   await expect(page.getByText('AI scan limit reached. This report uses the local parser.')).toBeVisible();
   await expect(page.locator('pre')).toContainText('Avery Morgan');

@@ -1,4 +1,5 @@
 import { generateText, Output } from 'ai';
+import { createGroq } from '@ai-sdk/groq';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { CloudAnalysis } from '../src/cloud-analysis.ts';
 import { analysisSchema, groundAnalysis } from './analysis.ts';
@@ -23,23 +24,40 @@ Provide up to five distinct, actionable resume edits, each anchored to an exact 
 Ask for a missing fact only if the applicant can verify it. Never propose invented metrics or keyword stuffing.
 Return empty arrays when evidence is insufficient. Keep excerpts brief and skip duplicates.`;
 
-export type Analyzer = (input: AnalysisInput, signal: AbortSignal) => Promise<CloudAnalysis>;
+export interface Analyzer {
+  (input: AnalysisInput, signal: AbortSignal): Promise<CloudAnalysis>;
+  provider?: 'groq' | 'openai';
+}
 
 export function createAnalyzer(env: NodeJS.ProcessEnv, fetchOverride?: typeof fetch): Analyzer | null {
-  if (!env.OPENAI_API_KEY?.trim()) return null;
-  const provider = createOpenAI({ apiKey: env.OPENAI_API_KEY.trim(), fetch: fetchOverride });
-  const model = provider.responses(env.OPENAI_MODEL?.trim() || 'gpt-5.6-terra');
-  return async (input, signal) => {
+  const groqKey = env.GROQ_API_KEY?.trim();
+  const openAIKey = env.OPENAI_API_KEY?.trim();
+  const apiKey = groqKey || openAIKey;
+  if (!apiKey) return null;
+
+  const provider = groqKey ? 'groq' : 'openai';
+  const options = { apiKey, fetch: fetchOverride };
+  const groqModel = env.GROQ_MODEL?.trim() || 'openai/gpt-oss-120b';
+  const model = provider === 'groq'
+    ? createGroq(options)(groqModel)
+    : createOpenAI(options).responses(env.OPENAI_MODEL?.trim() || 'gpt-5.6-terra');
+  const providerOptions: Parameters<typeof generateText>[0]['providerOptions'] = provider === 'openai'
+    ? { openai: { store: false, reasoningEffort: 'low', reasoningSummary: null } }
+    : groqModel.startsWith('openai/gpt-oss-') ? { groq: { reasoningEffort: 'low' } } : undefined;
+
+  const analyze: Analyzer = async (input, signal) => {
     const { output } = await generateText({
       model,
       system: instructions,
       prompt: JSON.stringify(input),
       output: Output.object({ schema: analysisSchema, name: 'resume_analysis' }),
-      providerOptions: { openai: { store: false, reasoningEffort: 'low', reasoningSummary: null } },
-      maxOutputTokens: 6500,
+      providerOptions,
+      maxOutputTokens: provider === 'groq' ? 4000 : 6500,
       maxRetries: 1,
       abortSignal: signal,
     });
     return groundAnalysis(output, input);
   };
+  analyze.provider = provider;
+  return analyze;
 }

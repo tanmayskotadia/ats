@@ -34,7 +34,7 @@ export function matchWithModel(resume: MatchableResume, job: string, progress: P
       resolve(data.result);
     }
     function onError() { fail('The local ML worker stopped. Try again.'); }
-    const timer = setTimeout(() => fail('The local ML scan timed out. Try a shorter document or scan again.'), 120000);
+    const timer = setTimeout(() => fail('The local ML scan timed out. Try a shorter document or scan again.'), 240000);
     active.addEventListener('message', onMessage);
     active.addEventListener('error', onError);
     active.postMessage({ id, input } satisfies ModelRequest);

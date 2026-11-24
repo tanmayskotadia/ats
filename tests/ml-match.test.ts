@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseResume } from '../src/resume.ts';
-import { cosine, prepareMatches, rankMatches } from '../src/ml-match.ts';
+import { cosine, prepareMatches, retrieveCandidates, selectMatches } from '../src/ml-match.ts';
 import { retrievalLimits } from '../src/ml-config.ts';
 
 test('ML input excludes contact and denied experience and preserves source excerpts', () => {
@@ -51,6 +51,58 @@ Preferred skills: Tableau`;
   assert.ok(input.requirements.every(item => job.includes(item.text)));
 });
 
+test('explicit criteria preserve short technical names, credential levels and meaningful duration wording', () => {
+  const job = [
+    'Platform engineer',
+    'Our team builds products for a growing portfolio of clients.',
+    'Job title: Senior Engineer',
+    'About the company',
+    'We have used Java for 20 years.',
+    '### Responsibilities',
+    '1. Maintain the site’s Linux services.',
+    '2. 3–5 years of cloud operations.',
+    'Required skills: R, C++, .NET, CI/CD',
+    'Nice to have:',
+    'PMP',
+    'CFA Level II',
+    'B.S. Computer Science',
+    'No degree required.',
+    'We offer a competitive salary and paid holidays.',
+  ].join('\n');
+  const { requirements } = prepareMatches({ sections: [] }, job);
+  assert.deepEqual(requirements.map(item => item.text), [
+    'Maintain the site’s Linux services.', '3–5 years of cloud operations.',
+    'R', 'C++', '.NET', 'CI/CD', 'PMP', 'CFA Level II', 'B.S. Computer Science',
+  ]);
+  assert.ok(requirements.every(item => job.includes(item.text)));
+  assert.deepEqual(prepareMatches({ sections: [] }, '.NET').requirements, [{ text: '.NET' }]);
+});
+
+test('resume retrieval omits denied, prospective, and copied claims while keeping positive source clauses', () => {
+  const denial = 'No hands-on experience with ' + 'configuring production Kubernetes clusters for regional operations teams '.repeat(15);
+  const resume = { sections: [
+    { key: 'experience', label: 'Experience', lines: [
+      denial,
+      '• No experience with AWS, but migrated PostgreSQL services to Google Cloud.',
+      'I haven’t used Azure. Led incident follow-up and recovery reviews.',
+      'Not yet certified in Snowflake administration.',
+      'Plans to learn Rust for future projects.',
+      'You must have experience maintaining SQL Server.',
+    ] },
+    { key: 'skills', lines: ['C++', 'R', 'Learning and development', 'Candidate sourcing', 'Currently learning Terraform.'] },
+    { key: 'education', lines: ['B.S. Computer Science', 'M.S. Cybersecurity (in progress)'] },
+    { key: 'certifications', lines: ['PMP', 'Expired BLS certification'] },
+    { key: 'other', label: 'References', lines: ['Jane Doe, team lead for Elasticsearch operations.'] },
+  ] } satisfies Parameters<typeof prepareMatches>[0];
+  const { evidence } = prepareMatches(resume, 'Cloud operations and BLS certification.');
+  assert.deepEqual(evidence.map(item => item.text), [
+    'migrated PostgreSQL services to Google Cloud.',
+    'Led incident follow-up and recovery reviews.',
+    'C++', 'R', 'Learning and development', 'Candidate sourcing', 'B.S. Computer Science', 'PMP',
+  ]);
+  assert.ok(evidence.every(item => resume.sections.some(section => section.lines.some(line => line.includes(item.text)))));
+});
+
 test('limited evidence includes later sections instead of exhausting the budget on early roles', () => {
   const experience = Array.from({ length: 200 }, (_, index) => 'Maintained operations dashboard number ' + index);
   const resume = { sections: [
@@ -66,6 +118,24 @@ test('limited evidence includes later sections instead of exhausting the budget 
   assert.equal(input.evidence.filter(item => item.section === 'experience').length, 157);
 });
 
+test('section sampling preserves approximate source proportions and later passages', () => {
+  const experience = Array.from({ length: 240 }, (_, index) => 'Maintained dashboard for delivery station ' + index);
+  const projects = Array.from({ length: 80 }, (_, index) => 'Built procurement model for distribution project ' + index);
+  const resume = { sections: [
+    { key: 'experience', lines: experience },
+    { key: 'projects', lines: projects },
+    { key: 'certifications', lines: ['PMP'] },
+  ] } satisfies Parameters<typeof prepareMatches>[0];
+  const input = prepareMatches(resume, 'Design dashboards to track warehouse inventory.');
+  assert.equal(input.totalEvidence, 321);
+  assert.equal(input.evidence.length, retrievalLimits.resumeChunks);
+  const selected = input.evidence.filter(item => item.section === 'experience');
+  assert.ok(Math.abs(selected.length - retrievalLimits.resumeChunks * 240 / 321) < 2);
+  assert.ok(input.evidence.some(item => item.text === 'PMP'));
+  assert.ok(input.evidence.some(item => item.text === experience.at(-1)));
+  assert.ok(input.evidence.some(item => item.text === projects.at(-1)));
+});
+
 test('long requirements and evidence remain bounded contiguous source excerpts', () => {
   const evidence = 'Built a reporting service. ' + 'Maintained detailed delivery records for regional operations teams. '.repeat(18);
   const job = 'Required skills: ' + 'Maintain delivery forecasts and explain warehouse trends. '.repeat(18);
@@ -75,20 +145,34 @@ test('long requirements and evidence remain bounded contiguous source excerpts',
   assert.ok(input.requirements.every(item => item.text.length <= retrievalLimits.chunkCharacters && job.includes(item.text)));
 });
 
-test('ranks semantic evidence by cosine distance and discards weak or invalid vectors', () => {
+test('shortlists by cosine similarity and filters weak embedding-only matches', () => {
   const input = {
     requirements: [{ text: 'Maintain dashboards' }],
     evidence: [
       { text: 'Relevant', section: 'experience' },
       { text: 'Unrelated', section: 'experience' },
     ],
-  } satisfies Parameters<typeof rankMatches>[0];
-  const matches = rankMatches(input, [[1, 0], [0.9, 0.1], [0, 1]]);
+  } satisfies Parameters<typeof retrieveCandidates>[0];
+  const vectors = [[1, 0], [0.9, 0.1], [0, 1]];
+  assert.equal(retrieveCandidates(input, vectors, 1)[0].evidence.length, 1);
+  const matches = selectMatches(retrieveCandidates(input, vectors));
   assert.equal(matches[0].evidence.length, 1);
   assert.equal(matches[0].evidence[0].text, 'Relevant');
   assert.ok(matches[0].evidence[0].similarity > 0.99);
   assert.equal(cosine([0, 0], [1, 0]), 0);
-  assert.throws(() => rankMatches(input, [[1, 0]]), /Incomplete/);
+  assert.throws(() => retrieveCandidates(input, [[1, 0]]), /Incomplete/);
   assert.throws(() => cosine([1], [1, 0]), /dimensions/);
   assert.throws(() => cosine([NaN], [1]), /Invalid/);
+});
+
+test('reranks each criterion independently and withholds candidates below the relevance cutoff', () => {
+  const item = (text: string, similarity: number) => ({ text, similarity, section: 'experience' as const });
+  const candidates = [
+    { requirement: 'First criterion', evidence: [item('Close wording', 0.9), item('Supporting passage', 0.7)] },
+    { requirement: 'Second criterion', evidence: [item('Only a distractor', 0.95)] },
+  ];
+  const matches = selectMatches(candidates, [0.65, 0.9, 0.1]);
+  assert.deepEqual(matches.map(match => match.evidence.map(passage => passage.text)), [['Supporting passage', 'Close wording'], []]);
+  assert.throws(() => selectMatches(candidates, [0.9, 0.1]), /Invalid reranker output/);
+  assert.throws(() => selectMatches(candidates, [0.9, NaN, 0.1]), /Invalid reranker output/);
 });

@@ -65,6 +65,7 @@ test('uses the OpenAI Responses protocol with strict schema and storage disabled
     });
   });
   assert.ok(analyze);
+  assert.equal(analyze.provider, 'openai');
   const result = await analyze(input, AbortSignal.timeout(5000));
   assert.equal(result.skills[0].label, 'Tableau');
 });
@@ -89,6 +90,40 @@ test('reports unavailable AI without credentials', async context => {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.deepEqual(await response.json(), { aiEnabled: false });
   assert.equal((await post(input)).status, 503);
+});
+
+test('uses Groq with strict structured output and masks contact text before sending it', async context => {
+  const analyze = createAnalyzer({ GROQ_API_KEY: ' groq-test-key ', OPENAI_API_KEY: 'openai-test-key' }, async (url, init) => {
+    assert.equal(String(url), 'https://api.groq.com/openai/v1/chat/completions');
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer groq-test-key');
+    assert.ok(typeof init?.body === 'string');
+    assert.ok(init.body.includes('[email removed]'));
+    assert.ok(!init.body.includes('avery@example.com'));
+    const body: {
+      model: string;
+      response_format: {
+        type: string;
+        json_schema: { name: string; strict: boolean; schema: { required: string[]; additionalProperties: boolean } };
+      };
+    } = JSON.parse(init.body);
+    assert.equal(body.model, 'openai/gpt-oss-120b');
+    assert.equal(body.response_format.type, 'json_schema');
+    assert.equal(body.response_format.json_schema.name, 'resume_analysis');
+    assert.equal(body.response_format.json_schema.strict, true);
+    assert.equal(body.response_format.json_schema.schema.additionalProperties, false);
+    assert.deepEqual(body.response_format.json_schema.schema.required, ['entries', 'skills', 'requirements', 'improvements']);
+    return Response.json({
+      id: 'chatcmpl_test', created: 1, model: body.model,
+      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(output) }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, completion_tokens: 200, total_tokens: 300 },
+    });
+  });
+  assert.ok(analyze);
+  const { url, post } = await testServer(context, {}, analyze);
+  assert.deepEqual(await (await fetch(url + '/api/status')).json(), { aiEnabled: true, aiProvider: 'groq' });
+  const result = await post(input);
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), groundAnalysis(output, input));
 });
 
 test('bounds concurrent requests, validates input, and masks contact data', async context => {

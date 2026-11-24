@@ -10,7 +10,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'npm start',
-    env: { PORT: '4173', HOST: '127.0.0.1', OPENAI_API_KEY: '', REDIS_URL: '' },
+    env: { PORT: '4173', HOST: '127.0.0.1', GROQ_API_KEY: '', OPENAI_API_KEY: '', REDIS_URL: '' },
     url: 'http://127.0.0.1:4173',
   },
 });

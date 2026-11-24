@@ -24,7 +24,10 @@ export function createApi(env: NodeJS.ProcessEnv, { analyze = createAnalyzer(env
     next();
   });
   app.get('/healthz', (request, response) => response.json({ ok: true }));
-  app.get('/api/status', (request, response) => response.json({ aiEnabled: Boolean(analyze) }));
+  app.get('/api/status', (_request, response) => response.json({
+    aiEnabled: Boolean(analyze),
+    aiProvider: analyze?.provider,
+  }));
 
   app.post('/api/analyze', (request, response, next) => {
     if (request.get('sec-fetch-site') === 'cross-site') return response.status(403).json({ error: 'Use the app on the same origin.' });

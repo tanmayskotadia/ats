@@ -1,85 +1,109 @@
-import { env, AutoModel, AutoTokenizer, FeatureExtractionPipeline } from '@huggingface/transformers';
-import type { PretrainedModelOptions } from '@huggingface/transformers';
-import { embeddingModel } from './ml-config.ts';
-import { rankMatches } from './ml-match.ts';
+import { env } from '@huggingface/transformers';
+import { embeddingModel, rerankingModel } from './ml-config.ts';
+import type { ModelArtifact } from './ml-config.ts';
+import { loadEmbedder, loadReranker } from './ml-inference.ts';
+import type { ModelLocation } from './ml-inference.ts';
+import { retrieveCandidates, selectMatches } from './ml-match.ts';
 import type { ModelRequest, ModelResponse } from './ml-match.ts';
 import type { ProgressCallback } from './resume.ts';
 
 declare const self: DedicatedWorkerGlobalScope;
 
-env.allowLocalModels = false;
-env.useBrowserCache = true;
+const appBase = new URL(import.meta.env.BASE_URL, self.location.origin);
+const models = new URL('models/', appBase);
+env.localModelPath = models.pathname;
 const wasm = env.backends.onnx.wasm;
 if (!wasm) throw new Error('The ONNX WebAssembly backend is unavailable.');
 wasm.numThreads = 1;
 wasm.proxy = false;
-const runtime = new URL('ml-runtime/', new URL(import.meta.env.BASE_URL, self.location.origin));
+const runtime = new URL('ml-runtime/', appBase);
 wasm.wasmPaths = {
   mjs: new URL('ort-wasm-simd-threaded.mjs', runtime).href,
   wasm: new URL('ort-wasm-simd-threaded.wasm', runtime).href,
 };
 
-let extractor: Promise<FeatureExtractionPipeline> | undefined;
-async function getExtractor(progress: ProgressCallback) {
-  if (!extractor) {
-    extractor = (async () => {
-      const local = new URL('models/minilm/', new URL(import.meta.env.BASE_URL, self.location.origin)).href;
-      let hosted = false;
-      try {
-        const response = await fetch(local + 'ready.json', { signal: AbortSignal.timeout(3000) });
-        const manifest: unknown = response.ok ? await response.json() : null;
-        hosted = typeof manifest === 'object' && manifest !== null && 'revision' in manifest &&
-          manifest.revision === embeddingModel.revision;
-      } catch { /* Use the pinned public model if the host has no model assets. */ }
-      env.allowLocalModels = hosted;
-      env.allowRemoteModels = !hosted;
-      env.localModelPath = new URL('../', local).pathname;
-      const options: PretrainedModelOptions = {
-        dtype: embeddingModel.dtype,
-        device: 'wasm',
-        revision: hosted ? 'main' : embeddingModel.revision,
-        progress_callback: event => {
-          if (event.status === 'progress' && event.file?.endsWith('.onnx')) {
-            progress('Loading local ML model… ' + Math.round(event.progress) + '%');
-          }
-        },
-      };
-      const id = hosted ? 'minilm' : embeddingModel.id;
-      const [model, tokenizer] = await Promise.all([
-        AutoModel.from_pretrained(id, options),
-        AutoTokenizer.from_pretrained(id, options),
-      ]);
-      tokenizer.config.model_max_length = 192;
-      return new FeatureExtractionPipeline({ task: 'feature-extraction', model, tokenizer });
-    })().catch(error => { extractor = undefined; throw error; });
-  }
-  return extractor;
+async function locateModel(artifact: ModelArtifact, progress: ProgressCallback): Promise<ModelLocation> {
+  let hosted = false;
+  try {
+    const manifestUrl = new URL(`${artifact.folder}/ready.json`, models);
+    const response = await fetch(manifestUrl, { signal: AbortSignal.timeout(3000) });
+    const manifest: unknown = response.ok ? await response.json() : null;
+    hosted = typeof manifest === 'object' && manifest !== null && 'id' in manifest && manifest.id === artifact.id &&
+      'revision' in manifest && manifest.revision === artifact.revision;
+  } catch { /* Download the pinned public weights when they are not hosted. */ }
+
+  // These models load sequentially. The SDK's tokenizer metadata probe does not forward the revision option.
+  env.remotePathTemplate = `{model}/resolve/${artifact.revision}/`;
+  env.allowLocalModels = hosted;
+  env.allowRemoteModels = !hosted;
+  env.useBrowserCache = !hosted;
+  return {
+    id: hosted ? artifact.folder : artifact.id,
+    options: {
+      dtype: artifact.dtype,
+      device: 'wasm',
+      revision: hosted ? 'main' : artifact.revision,
+      local_files_only: hosted,
+      progress_callback: event => {
+        if (event.status === 'progress' && event.file?.endsWith('.onnx')) {
+          progress(`Loading ${artifact.name}… ${Math.round(event.progress)}%`);
+        }
+      },
+    },
+  };
 }
+
+let embedder: Promise<Awaited<ReturnType<typeof loadEmbedder>>> | undefined;
+let reranker: Promise<Awaited<ReturnType<typeof loadReranker>>> | undefined;
+let lastQueries: { key: string; vectors: Float32Array[] } | undefined;
 
 self.onmessage = async (event: MessageEvent<ModelRequest>) => {
   const { id, input } = event.data;
   const progress: ProgressCallback = status => self.postMessage({ id, status } satisfies ModelResponse);
   try {
-    progress('Loading local ML model…');
-    const model = await getExtractor(progress);
-    const texts = [...input.requirements, ...input.evidence].map(item => item.text);
-    const vectors: Float32Array[] = [];
-    for (let index = 0; index < texts.length; index += 8) {
-      progress('Comparing resume evidence… ' + Math.round(100 * index / texts.length) + '%');
-      const tensor = await model(texts.slice(index, index + 8), { pooling: 'mean', normalize: true });
-      try {
-        const { data, dims } = tensor;
-        if (!(data instanceof Float32Array) || dims.length !== 2 || dims[0] * dims[1] !== data.length) {
-          throw new Error('The model returned an invalid embedding batch.');
-        }
-        const [batchSize, dimensions] = dims;
-        for (let row = 0; row < batchSize; row += 1) {
-          vectors.push(data.slice(row * dimensions, (row + 1) * dimensions));
-        }
-      } finally { tensor.dispose(); }
+    progress(`Loading ${embeddingModel.name}…`);
+    const encoder = await (embedder ??= locateModel(embeddingModel, progress)
+      .then(location => loadEmbedder(location, embeddingModel))
+      .catch(error => { embedder = undefined; throw error; }));
+
+    const queries = input.requirements.map(requirement => requirement.text);
+    const queryKey = JSON.stringify(queries);
+    if (lastQueries?.key !== queryKey) {
+      const vectors: Float32Array[] = [];
+      for (let index = 0; index < queries.length; index += 4) {
+        progress(`Encoding job criteria… ${Math.round(100 * index / queries.length)}%`);
+        vectors.push(...await encoder.embed(queries.slice(index, index + 4), true));
+      }
+      lastQueries = { key: queryKey, vectors };
     }
-    self.postMessage({ id, result: { model: embeddingModel.name, revision: embeddingModel.revision,
-      matches: rankMatches(input, vectors),
+    const passages = input.evidence.map(item => item.text);
+    const vectors = [...lastQueries.vectors];
+    for (let index = 0; index < passages.length; index += 4) {
+      progress(`Encoding resume passages… ${Math.round(100 * index / passages.length)}%`);
+      vectors.push(...await encoder.embed(passages.slice(index, index + 4)));
+    }
+
+    const candidates = retrieveCandidates(input, vectors);
+    let matches;
+    let secondModel;
+    try {
+      progress(`Loading ${rerankingModel.name}…`);
+      const ranker = await (reranker ??= locateModel(rerankingModel, progress)
+        .then(loadReranker).catch(error => { reranker = undefined; throw error; }));
+      const pairs = candidates.flatMap(match => match.evidence.map(item => ({ query: match.requirement, passage: item.text })));
+      const scores: number[] = [];
+      for (let index = 0; index < pairs.length; index += 8) {
+        progress(`Reranking related evidence… ${Math.round(100 * index / pairs.length)}%`);
+        scores.push(...await ranker.score(pairs.slice(index, index + 8)));
+      }
+      matches = selectMatches(candidates, scores);
+      secondModel = { model: rerankingModel.name, revision: rerankingModel.revision };
+    } catch {
+      matches = selectMatches(candidates);
+    }
+
+    self.postMessage({ id, result: {
+      model: embeddingModel.name, revision: embeddingModel.revision, reranker: secondModel, matches,
       evidenceCount: input.evidence.length, requirementCount: input.requirements.length,
       totalEvidence: input.totalEvidence, totalRequirements: input.totalRequirements,
     } } satisfies ModelResponse);

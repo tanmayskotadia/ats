@@ -15,34 +15,43 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. Local parsing works immediately. For AI, copy `.env.example` to `.env`, set `OPENAI_API_KEY`, and restart the server. Enable **AI-assisted parsing** before scanning. The default model is `gpt-5.6-terra`. Set `OPENAI_MODEL` to override it with a model that supports Structured Outputs on the OpenAI Responses API. Keep the key server-side.
+Open the URL printed by Vite. Local parsing works immediately.
+
+For optional AI-assisted parsing, copy `.env.example` to `.env`, configure a server-side key, and restart the server. Enable **AI-assisted parsing** before scanning.
+
+- **Groq** uses `GROQ_API_KEY` and defaults to `openai/gpt-oss-120b`. Set `GROQ_MODEL` to override it with a model that supports strict Structured Outputs. [Groq Structured Outputs](https://console.groq.com/docs/structured-outputs)
+- **OpenAI** uses `OPENAI_API_KEY` and defaults to `gpt-5.6-terra`. Set `OPENAI_MODEL` to override it with a model that supports Structured Outputs on the OpenAI Responses API.
+
+Groq takes priority when both keys are set. Leave both keys empty to disable AI-assisted parsing. Keep keys in the server environment or local `.env` file.
 
 ## Local ML and profile reading
 
-**Local ML evidence search** uses the pretrained MiniLM-L6-v2 sentence embedding model to retrieve resume passages related to job requirements. It runs in a browser worker with ONNX Runtime and needs no API key. The existing Tesseract LSTM model handles English scans. Neither model has been trained on private resume data by this project.
+**Local ML evidence search** uses BGE Base v1.5 to shortlist resume passages and DeBERTa-v3 to check how closely each passage supports the job criterion. Both pretrained English models run in a browser worker with ONNX Runtime. Enable the checkbox and add a job description to use them. No API key or Python service is required.
 
-To serve the pinned MiniLM weights with your app, download them before starting or building.
+To serve the pinned model files from your app, download them before starting or building.
 
 ```sh
 npm run models:download
 npm run dev
 ```
 
-The weights are about 23 MB. The local ML runtime is also downloaded by the browser on first use. If the host has no model files, the worker downloads the pinned model from Hugging Face and caches it where the browser supports caching. Resume and job text are processed locally by this feature. `public/models/` and generated runtime assets are ignored by Git. Run the download command before the production build to include the weights in `dist/`.
+The two models and their tokenizers take about 210 MB, plus the browser ML runtime. When files are missing from the app host, the browser downloads the pinned assets from Hugging Face and caches them where supported. Resume and job text stay in the browser during local inference. `public/models/` and generated runtime assets are ignored by Git. Run the download command before the production build to include the weights in `dist/`.
 
 - Profiles group employment, education, projects, and credentials with their source lines. Skills are detected in both the Skills section and role descriptions, including common aliases.
 - Employment duration uses the union of explicit month ranges, so overlapping roles count once. Year-only, missing, reversed, and future dates are flagged. The month total is an estimate from calendar months and includes internships that appear under Experience.
-- ML compares up to 36 job passages against 160 resume passages, with a 420-character limit per chunk and a tokenizer limit of 192 tokens. Reports show when the passage limit was reached. At most one inference job runs at a time per browser, sharing the loaded model across the batch.
-- Job passage selection skips company and benefits sections, retains short explicit skill requirements, and resumes at requirement headings. Large resumes are sampled across sections so later projects, education, and skills remain represented.
-- The report shows the two nearest passages whose cosine similarity is at least 0.35. Similarity is a retrieval measure and earns no score points. This threshold has not been calibrated on hiring outcomes. English paraphrases can be helpful, while tools, credentials, durations, and negation still need checking against the source.
-- Model failure and timeout preserve the profile and keyword report and display a note. Machine learning runs only when the checkbox is enabled and a job description is present.
+- ML compares up to 36 job criteria against 160 resume passages, with a 420-character limit per chunk and a 192-token model input limit. An app tab handles one ML scan at a time and reuses loaded models and job embeddings across a batch.
+- Criterion extraction skips company and benefits sections and preserves concise tools, credentials, and experience requirements. Passage selection filters clearly negated or prospective statements and samples across resume sections when coverage is limited.
+- BGE shortlists up to six passages per criterion. DeBERTa compares each shortlisted passage with the requirement and the report shows up to two that pass its relevance cutoff. Review exact tools, credentials, durations, and responsibilities against the source. These suggestions earn no ATS score points.
+- If DeBERTa is unavailable, the related-experience view uses BGE similarity and identifies the fallback. If the encoder fails or the scan times out, the profile, scoring, and keyword report remain available.
 
 ## Parsing and scoring
 
 - Text-based or scanned PDF, DOCX, TXT, PNG, and JPEG. Files are limited to 15 MB and PDFs to 20 pages.
 - PDF reading order is estimated from text coordinates. Pages with little embedded text and image uploads use English OCR. Word extraction includes visible paragraph text from the body, tables, text boxes, headers, footers, and notes. Image-only content inside DOCX is not OCRed.
 - Local mode detects headings, contact details, dates, impact statements, and keywords. It keeps resume text in the browser.
-- In AI mode, Shortlist sends extracted resume text and the job description to OpenAI after masking detected resume emails and phone numbers. Files are never uploaded. The app does not persist resume text or AI results, and the Responses API request sets `store: false`. See [OpenAI's data controls](https://developers.openai.com/api/docs/guides/your-data) for provider-side handling.
+- In AI mode, Shortlist sends extracted resume text and the job description to the configured provider after masking detected resume emails and phone numbers. Resume files stay in the browser. Shortlist processes the text and AI result in memory.
+- Groq retains usage metadata and may keep inference inputs and outputs for up to 30 days to investigate reliability issues or suspected abuse, subject to legal obligations. Organization admins can enable Zero Data Retention for inference logs. [Groq data controls](https://console.groq.com/docs/your-data)
+- The OpenAI Responses API request sets `store: false`. [OpenAI data controls](https://developers.openai.com/api/docs/guides/your-data)
 - The AI extracts roles, education, credentials, projects and other entries into a structured schema. The server verifies the cited excerpts against the source text. Job matching can recognize equivalent experience and displays the excerpt behind each semantic match. Editing suggestions are linked to source text and should be reviewed. If the service is unavailable, the report identifies the local parser as its fallback.
 - The app calculates the score. The model does not choose the number. Employer ATS criteria vary.
 - Repeated or very short accomplishment statements earn no extra impact points. Denied or prospective skills earn no keyword credit, and duration or credential requirements need supporting evidence.
@@ -89,6 +98,13 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-The automated AI tests use controlled provider responses to exercise the request contract, grounding, quota handling, and report UI without a billed API call. The actual MiniLM browser test runs when local model files are installed. It verifies paraphrase retrieval and that inference keeps document text on the app origin. Local profile and scoring regression tests cover overlaps, uncertain dates, negation, aliases, duplicate bullets, and unsupported credentials.
+The automated AI tests use controlled provider responses to exercise the request contract, grounding, quota handling, and report UI without a billed API call. With the local files installed, browser tests run real BGE and DeBERTa inference on the app origin and check that ML leaves the ATS score unchanged. Local profile and scoring regression tests cover overlaps, uncertain dates, negation, aliases, duplicate bullets, and unsupported credentials.
 
-Model references are available in the [MiniLM model card](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) and the [ONNX conversion](https://huggingface.co/Xenova/all-MiniLM-L6-v2/tree/751bff37182d3f1213fa05d7196b954e230abad9).
+To compare ranking and false positives with the previous MiniLM model, run the offline benchmark against the manually labeled synthetic requirements and resume excerpts.
+
+```sh
+npm run models:download -- --baseline
+npm run models:benchmark
+```
+
+Model references include the [BGE Base v1.5 model card](https://huggingface.co/BAAI/bge-base-en-v1.5) and the [DeBERTa-v3 NLI model card](https://huggingface.co/cross-encoder/nli-deberta-v3-xsmall).
