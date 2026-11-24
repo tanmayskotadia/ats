@@ -43,7 +43,7 @@ The weights are about 23 MB. The local ML runtime is also downloaded by the brow
 - In AI mode, Shortlist sends extracted resume text and the job description to OpenAI after masking detected resume emails and phone numbers. Files are never uploaded. The app does not persist resume text or AI results, and the Responses API request sets `store: false`. See [OpenAI's data controls](https://developers.openai.com/api/docs/guides/your-data) for provider-side handling.
 - The AI extracts roles, education, credentials, projects and other entries into a structured schema. The server verifies the cited excerpts against the source text. Job matching can recognize equivalent experience and displays the excerpt behind each semantic match. Editing suggestions are linked to source text and should be reviewed. If the service is unavailable, the report identifies the local parser as its fallback.
 - The app calculates the score. The model does not choose the number. Employer ATS criteria vary.
-- Repeated or very short accomplishment statements earn no extra impact points. Denied skills earn no keyword credit, and duration or credential requirements need explicit supporting evidence.
+- Repeated or very short accomplishment statements earn no extra impact points. Denied or prospective skills earn no keyword credit, and duration or credential requirements need supporting evidence.
 
 | Category | Points |
 | --- | ---: |
@@ -53,6 +53,12 @@ The weights are about 23 MB. The local ML runtime is also downloaded by the brow
 | Content coverage or job match | 25 |
 
 When a job description yields usable criteria, weighted job coverage replaces content coverage. Preferred requirements carry half the weight. With AI disabled or without grounded AI criteria, Shortlist compares job keywords using a skills vocabulary, aliases and labeled lists.
+
+Rubric 2.0 separates job coverage (15 points) from supporting work or study context (10 points). Skill lists and summaries earn half the supporting credit. Company descriptions and benefits are excluded from criteria, and uncovered local criteria stay in the denominator when an AI response covers only part of a posting. Named skill durations use explicit claims or non-overlapping dated roles that cite the skill. Duration inference from a role is an estimate of tool use during that role.
+
+Structure checks use detected fields and valid date coverage across roles. Projects can supply the work-evidence check when employment is absent. Impact checks distinguish measured changes (up to 12 points) from qualitative outcomes and scale counts. Numeric variants of a statement count once, and scale counts alone earn at most two outcome points. A substantive summary is optional when work descriptions provide sufficient context. Clear OCR and reconstructed layouts produce review notes. Poor extraction signals reduce credit.
+
+These are transparent heuristics with regression tests. Employer-specific calibration and hiring-outcome validation are unavailable. The report includes the rubric version and evidence for each check so scores can be interpreted consistently.
 
 ## Run in production
 

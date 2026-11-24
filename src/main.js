@@ -96,7 +96,8 @@ document.querySelector('#app').innerHTML = `
   <div class="dialog-heading"><h2 id="help-title">How scoring works</h2><button class="icon-button" id="close-help" aria-label="Close" type="button">${icon('x')}</button></div>
   <p>Shortlist calculates an advisory score using these checks. Employer ATS rules and recruiter decisions vary.</p>
   <dl><div><dt>ATS readability</dt><dd>20 points</dd></div><div><dt>Resume structure</dt><dd>25 points</dd></div><div><dt>Experience & impact</dt><dd>30 points</dd></div><div><dt>Content coverage or job keyword match</dt><dd>25 points</dd></div></dl>
-  <p>A job description can replace content coverage with a job match. Preferred requirements carry half the weight. AI-assisted reports show the excerpts behind their matches. Local ML retrieves related passages for you to review. Similarity measures how close the text is in meaning and earns no score points.</p>
+  <p>A job description replaces content coverage when usable criteria are found. Job coverage earns up to 15 points and supporting work or study evidence earns up to 10. Listed or summary claims earn half the supporting credit. Preferred criteria carry half the weight of required criteria.</p>
+  <p>Outcome checks distinguish measured changes, qualitative results, and task counts. Dates are checked across detected roles. These rules estimate resume readiness and have no employer-specific calibration. Local ML similarity retrieves passages for review and earns no score points.</p>
 </dialog>
 <dialog id="edit-dialog" class="edit-dialog" aria-labelledby="edit-title">
   <form id="edit-form">
@@ -422,8 +423,10 @@ function overview(result, analysis) {
     <p class="muted timeline-note">${escape(profile.experience.notes.join(' '))}</p>
     </section><div class="report-grid"><section class="card report-card"><h2>Score breakdown</h2>
     <div class="metric-list">${categoryRows(result.categories)}</div>
+    <p class="score-basis">${result.mode === 'job-specific' ? 'Job-specific readiness' : 'General resume readiness'} · Rubric ${escape(result.rubricVersion)}</p>
+    ${result.notes.length ? `<ul class="score-notes">${result.notes.map(note => `<li>${escape(note)}</li>`).join('')}</ul>` : ''}
     <div class="rubric">${result.categories.map(category => `<details><summary>${escape(category.title)} ${icon('chevron-down')}</summary>
-    <ul>${category.checks.map(check => `<li><span>${escape(check.title)}</span><b>${check.points}/${check.max}</b></li>`).join('')}</ul></details>`).join('')}</div>
+    <ul>${category.checks.map(check => `<li><span>${escape(check.title)}<small class="check-explanation">${escape(check.evidence)}</small></span><b>${check.points}/${check.max}</b></li>`).join('')}</ul></details>`).join('')}</div>
     </section><section class="card report-card"><h2>What to improve</h2>
     <p class="muted">Ordered by potential points in this scan.</p>
     ${suggestions ? `<ol class="suggestions">${suggestions}</ol>` : '<p>Every check earned full points in this scan.</p>'}</section></div>
@@ -502,7 +505,9 @@ function keywordComparison(result) {
   const list = (terms, matched) => terms.length ? `<ul class="keyword-list">${terms.map(term => `<li>
     <span class="tile ${matched ? 'matched' : 'missing'}">${icon(matched ? 'check' : 'search')}</span><div><strong>${escape(term.label)}</strong>
     ${term.preferred ? '<span class="optional">Preferred</span>' : ''}
+    ${term.kind && matched ? `<span class="optional">${({ demonstrated: 'Supporting context', listed: 'Listed claim', summary: 'Summary claim' })[term.kind] || ''}</span>` : ''}
     ${term.jobEvidence ? `<p><b>Job</b> ${escape(term.jobEvidence)}</p>` : ''}
+    ${term.reason ? `<p>${escape(term.reason)}</p>` : ''}
     ${term.evidence ? `<p><b>Resume</b> ${escape(term.evidence)}</p>` : ''}</div></li>`).join('')}</ul>` : '<p class="muted">No terms in this group.</p>';
   return `<div class="report-grid"><section class="card report-card"><h2>${comparison.semantic ? 'Supported requirements' : 'Matched keywords'} <span class="count">${comparison.matched.length}</span></h2>
     <p class="muted">Evidence found in your resume.</p>${list(comparison.matched, true)}</section>
@@ -553,6 +558,8 @@ function downloadReport() {
       ...category.checks.map(check => `  ${check.title}: ${check.points}/${check.max}`),
     ]), '', 'Improvements', ...result.improvements.map(check => `- ${check.title} (+${check.max - check.points}): ${check.advice}`)];
   lines.splice(3, 0, 'Text source: ' + (resume.metadata.textEdited ? 'Edited text' : 'File extraction'), 'Revision: ' + current.revision);
+  lines.splice(3, 0, 'Scoring rubric: ' + result.rubricVersion + ' · ' + result.mode);
+  lines.push('', 'Scoring notes', ...result.notes);
   if (current.previous) lines.push('', `Previous score: ${current.previous.score}/100`,
     current.previous.jobChanged ? 'Job description changed for this revision.' : 'The job description is the same as the previous revision.');
   if (current.feedback.length) lines.push('', 'Edits to work on', ...current.feedback.map(item => `- ${item.title}\n  Source: ${item.evidence}\n  ${item.detail}`));

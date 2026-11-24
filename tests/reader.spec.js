@@ -176,7 +176,8 @@ test('AI scans are opt-in and show structured entries, job evidence, and improve
   await expect(page.getByRole('heading', { name: 'Skills with evidence' })).toBeVisible();
   await page.getByRole('tab', { name: 'Job match' }).click();
   await expect(page.getByRole('heading', { name: /Supported requirements/ })).toBeVisible();
-  await expect(page.getByText('Built Tableau dashboards', { exact: false })).toBeVisible();
+  const semanticMatch = page.locator('.keyword-list li').filter({ has: page.getByText('Data visualization', { exact: true }) });
+  await expect(semanticMatch.getByText('Built Tableau dashboards', { exact: false })).toBeVisible();
 });
 
 test('explains when AI fails and uses the local rubric', async ({ page }) => {

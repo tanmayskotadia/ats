@@ -1,4 +1,7 @@
 import { cleanText, unique } from './resume.js';
+import { summarizeExperience } from './profile.js';
+import { jobCriteriaLines, evidenceLevel, quoteEvidenceLevel } from './job-match.js';
+import { impactSignals, wordsIn } from './scoring-signals.js';
 
 const groups = [
   'JavaScript=JS|TypeScript=TS|Python|Java|C#|C++|C|Go=Golang|Rust|Ruby|PHP|Swift|Kotlin|Scala|R|MATLAB|SQL|HTML|CSS|Bash|PowerShell|VBA',
@@ -16,8 +19,8 @@ const catalog = groups.flatMap(group => group.split('|')).map(entry => {
   const [label, aliases = ''] = entry.split('=');
   return { label, aliases: unique([label, ...aliases.split(',').filter(Boolean)]) };
 });
-const namedTechnologies = new Set(groups.slice(0, 3).flatMap(group => group.split('|').map(entry => entry.split('=')[0])));
-for (const concept of ['REST APIs', 'Microservices', 'System design', 'Distributed systems', 'Web accessibility', 'Responsive design', 'Data pipelines', 'Data warehousing']) {
+const namedTechnologies = new Set(groups.slice(0, 4).flatMap(group => group.split('|').map(entry => entry.split('=')[0])));
+for (const concept of ['REST APIs', 'Microservices', 'System design', 'Distributed systems', 'Web accessibility', 'Responsive design', 'Data pipelines', 'Data warehousing', 'Data analysis', 'Data visualization', 'Statistics', 'A/B testing', 'Machine learning', 'Deep learning', 'Natural language processing', 'Computer vision', 'Generative AI', 'Large language models', 'Data modeling']) {
   namedTechnologies.delete(concept);
 }
 const stopTerms = /^(?:strong|excellent|preferred|required|qualifications?|skills?|experience|years?|degree|knowledge|proficiency|team player|and|or|ability to work|other duties)$/i;
@@ -50,11 +53,13 @@ export function positiveTermMatch(text, term) {
 export function compareKeywords(resume, job) {
   const description = cleanText(job);
   if (!description) return { provided: false, matched: [], missing: [], total: 0, ratio: 0 };
-  const jobLines = description.split('\n');
-  const terms = catalog.filter(term => term.aliases.some(alias => positiveTermMatch(description, alias)));
+  const criteria = jobCriteriaLines(description);
+  const jobLines = criteria.map(item => item.text);
+  const relevantText = jobLines.join('\n');
+  const terms = catalog.filter(term => term.aliases.some(alias => positiveTermMatch(relevantText, alias)));
   const explicit = [];
   let inSkillList = false;
-  for (const line of jobLines.map(value => value.trim())) {
+  for (const line of description.split('\n').map(value => value.trim())) {
     const label = line.match(/^(?:(?:required|preferred|technical|core|key)\s+)?(?:skills|tools|technologies|keywords|tech stack)\s*:\s*(.*)$/i);
     const bullet = line.match(/^(?:[•*-]\s*|\d+[.)]\s+)(.+)$/);
     if (label) {
@@ -69,25 +74,32 @@ export function compareKeywords(resume, job) {
   }
   for (const label of unique(explicit.map(value => value.trim().replace(/[.!]$/, '')).filter(Boolean))) {
     if (label.length > 45 || label.split(/\s+/).length > 5 || stopTerms.test(label) || !/\p{L}/u.test(label)) continue;
-    if (!positiveTermMatch(description, label)) continue;
+    if (!positiveTermMatch(relevantText, label)) continue;
     if (!terms.some(term => term.aliases.some(alias => termMatches(label, alias)))) terms.push({ label, aliases: [label] });
   }
-  const required = [];
-  const preferred = [];
-  let inPreferred = false;
-  for (const line of jobLines) {
-    if (/^\s*(?:preferred|nice to have|bonus|desirable)/i.test(line)) inPreferred = true;
-    if (/^\s*(?:required|minimum|must have|essential|responsibilities|about|benefits)/i.test(line)) inPreferred = false;
-    (inPreferred ? preferred : required).push(line);
-  }
-  const requiredText = keywordForm(required.join(' '));
-  const preferredText = keywordForm(preferred.join(' '));
-  const resumeLines = resume.text.split(/[\n\f]/);
+  const requiredText = keywordForm(criteria.filter(item => !item.preferred).map(item => item.text).join(' '));
+  const preferredText = keywordForm(criteria.filter(item => item.preferred).map(item => item.text).join(' '));
   const sortedTerms = terms.map(term => {
     const preferredOnly = !term.aliases.some(alias => positiveTermMatch(requiredText, alias)) &&
       term.aliases.some(alias => positiveTermMatch(preferredText, alias));
-    const evidence = resumeLines.find(line => term.aliases.some(alias => positiveTermMatch(line, alias)));
-    return { label: term.label, preferred: preferredOnly, evidence: evidence || '' };
+    const support = evidenceLevel(resume, term.label, term.aliases, positiveTermMatch);
+    const durationCriterion = criteria.flatMap(item => item.text.split(/[,;]|\band\b/i))
+      .find(text => durationMonths(text).length && term.aliases.some(alias => termMatches(text, alias)));
+    if (durationCriterion) {
+      const requested = Math.max(...durationMonths(durationCriterion));
+      const explicit = resume.sections.filter(section => ['experience', 'summary', 'skills'].includes(section.key)).flatMap(section => section.lines).find(line =>
+        term.aliases.some(alias => positiveTermMatch(line, alias)) && durationForTerm(line, term.aliases).some(months => months >= requested));
+      const datedRoles = (resume.profile?.entries || []).filter(entry => entry.kind === 'experience' &&
+        entry.evidence.some(line => term.aliases.some(alias => positiveTermMatch(line, alias))) &&
+        !entry.evidence.some(line => term.aliases.some(alias => positiveTermMatch(line, alias)) && durationMonths(line).length));
+      const timeline = summarizeExperience(datedRoles);
+      if (!explicit && timeline.months < requested) {
+        return { label: term.label, preferred: preferredOnly, evidence: '', kind: 'missing', credit: 0,
+          reason: `The posting asks for ${requested} months. Sufficient duration with this skill was not found.`, jobEvidence: durationCriterion.trim() };
+      }
+      if (explicit) Object.assign(support, quoteEvidenceLevel(resume, explicit));
+    }
+    return { label: term.label, preferred: preferredOnly, ...support };
   }).sort((first, second) => Number(first.preferred) - Number(second.preferred) || first.label.localeCompare(second.label));
   return summarizeMatches(sortedTerms);
 }
@@ -116,7 +128,10 @@ function summarizeMatches(terms) {
   const matched = terms.filter(term => term.evidence);
   const missing = terms.filter(term => !term.evidence);
   const weight = list => list.reduce((total, term) => total + (term.preferred ? 1 : 2), 0);
-  return { provided: true, matched, missing, total: terms.length, ratio: terms.length ? weight(matched) / weight(terms) : 0 };
+  const denominator = weight(terms);
+  const supported = terms.reduce((total, term) => total + (term.preferred ? 1 : 2) * (term.credit ?? 0), 0);
+  return { provided: true, matched, missing, total: terms.length, ratio: denominator ? weight(matched) / denominator : 0,
+    evidenceRatio: denominator ? supported / denominator : 0 };
 }
 
 const evidenceForm = text => cleanText(text).replace(/\s+/g, ' ').toLowerCase();
@@ -132,6 +147,14 @@ function durationMonths(text) {
     .map(match => Number(match[1] || match[2]) * (/^year/i.test(match[3]) ? 12 : 1));
 }
 
+function durationForTerm(text, aliases) {
+  const durations = durationMonths(text);
+  if (durations.length <= 1) return durations;
+  return text.split(/[,;]|\band\b/i)
+    .filter(clause => aliases.some(alias => termMatches(clause, alias)))
+    .flatMap(durationMonths);
+}
+
 function cfaLevels(text) {
   const roman = { i: 1, ii: 2, iii: 3 };
   return [...text.matchAll(/\bCFA\b[^.!?;\n]{0,30}?\blevel\s*(I{1,3}|[1-3])\b/gi)]
@@ -140,7 +163,8 @@ function cfaLevels(text) {
 
 function verifiedRequirements(resume, job, requirements) {
   const source = evidenceForm(resume.text);
-  const posting = evidenceForm(job);
+  const criteria = jobCriteriaLines(cleanText(job));
+  const posting = evidenceForm(criteria.map(item => item.text).join(' '));
   const seen = new Set();
   return requirements.filter(item => {
     const label = evidenceForm(item.label || '');
@@ -154,8 +178,11 @@ function verifiedRequirements(resume, job, requirements) {
     const observed = durationMonths(evidence);
     const explicitTerms = catalog.filter(term => term.aliases.some(alias => termMatches(item.label, alias)));
     const durationTools = explicitTerms.filter(term => namedTechnologies.has(term.label));
-    const durationSupported = !duration.length || observed.some(months => months >= Math.max(...duration)) &&
-      durationTools.every(term => term.aliases.some(alias => positiveTermMatch(evidence, alias)));
+    const durationSupported = !duration.length || (durationTools.length ? durationTools.every(term => {
+      const requested = durationForTerm(item.label + ' ' + (item.jobEvidence || ''), term.aliases);
+      return term.aliases.some(alias => positiveTermMatch(evidence, alias)) &&
+        durationForTerm(evidence, term.aliases).some(months => months >= Math.max(...(requested.length ? requested : duration)));
+    }) : observed.some(months => months >= Math.max(...duration)));
     const credentials = credentialFamilies.filter(pattern => pattern.test(item.label));
     const credentialLanguage = /\b(?:certified|certification|certificate|licen[cs]e|licen[cs]ed)\b/i;
     const needsCredential = credentials.length > 0 || credentialLanguage.test(item.label);
@@ -169,69 +196,128 @@ function verifiedRequirements(resume, job, requirements) {
       (!needsCredential || !/\b(?:pursuing|preparing|studying|study|working toward|candidate|expected|in progress|planned|exam scheduled)\b/i.test(evidence));
     const denied = explicitTerms.some(term => term.aliases.some(alias => termMatches(evidence, alias)) &&
       !term.aliases.some(alias => positiveTermMatch(evidence, alias)));
-    return { ...item, evidence: present && durationSupported && credentialSupported && !denied ? evidence : '' };
+    const valid = present && durationSupported && credentialSupported && !denied;
+    const support = valid ? quoteEvidenceLevel(resume, evidence) : { kind: 'missing', credit: 0 };
+    const mentions = criteria.filter(line => evidenceForm(line.text).includes(evidenceForm(item.jobEvidence || item.label)));
+    return { ...item, preferred: mentions.length ? mentions.every(line => line.preferred) : Boolean(item.preferred),
+      evidence: valid && support.credit > 0 ? evidence : '', kind: support.kind, credit: support.credit };
   });
 }
 
+function roleStructure(resume, signals) {
+  const roles = resume.profile.entries.filter(entry => entry.kind === 'experience');
+  if (roles.length) {
+    const fields = roles.reduce((total, entry) => {
+      const timeline = summarizeExperience([entry]);
+      const dated = timeline.datedRoles + timeline.uncertainDates > 0;
+      return total + (entry.title ? 3 : 0) + (entry.organization ? 2 : 0) + (dated ? 4 : 0);
+    }, 0);
+    const timeline = summarizeExperience(roles);
+    return { points: Math.round(fields / roles.length),
+      evidence: `${roles.length} roles, ${roles.filter(entry => entry.organization).length} organizations, ${timeline.datedRoles + timeline.uncertainDates} valid date ranges. ${timeline.invalidDates} invalid and ${timeline.undatedRoles} missing ranges.` };
+  }
+  const projects = resume.profile.entries.filter(entry => entry.kind === 'project');
+  const supported = projects.filter(entry => signals.detailed.some(text => entry.evidence.some(line => line.includes(text))));
+  return { points: projects.length ? Math.round(3 + 6 * supported.length / projects.length) : 0,
+    evidence: `${supported.length} of ${projects.length} projects have specific work descriptions. Projects provide an alternative when employment is absent.` };
+}
+
 export function scoreResume(resume, job = '', requirements = []) {
-  const { contact, experienceDates, sections, skills, wordCount, metadata } = resume;
-  const seen = new Set();
-  const statements = resume.statements.filter(line => {
-    const normalized = evidenceForm(line);
-    if ((normalized.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) < 6 || seen.has(normalized)) return false;
-    seen.add(normalized);
-    return true;
+  const { contact, sections, wordCount, metadata } = resume;
+  const signals = impactSignals(resume);
+  const local = compareKeywords(resume, job);
+  const grounded = verifiedRequirements(resume, job, requirements);
+  const extraTerms = [...local.matched, ...local.missing].filter(term => {
+    const aliases = catalog.find(item => item.label === term.label)?.aliases || [term.label];
+    return !grounded.some(item => aliases.some(alias => termMatches(item.label, alias)));
   });
-  const actionStatements = statements.filter(line => resume.actionStatements.includes(line));
-  const quantifiedStatements = statements.filter(line => resume.quantifiedStatements.includes(line));
-  const has = key => sections.some(section => section.key === key && section.lines.length > 0);
-  const groundedRequirements = verifiedRequirements(resume, job, requirements);
-  const keywords = groundedRequirements.length ? { ...summarizeMatches(groundedRequirements), semantic: true } : compareKeywords(resume, job);
-  const check = (id, title, points, max, advice, evidence = '') => ({ id, title, points, max, advice, evidence });
+  const keywords = grounded.length ? { ...summarizeMatches([...grounded, ...extraTerms]), semantic: true } : local;
+  const specificSkills = skillEvidence(resume).filter(item => item.label.length <= 60 && wordsIn(item.label).length <= 5 &&
+    !/^(?:excellent|strong|good|hardworking|team player|motivated|skills|competencies|proficient)$/i.test(item.label));
+  const skillSupport = specificSkills.map(item => evidenceLevel(resume, item.label,
+    catalog.find(term => term.label === item.label)?.aliases || [item.label], positiveTermMatch));
+  const skillSections = sections.filter(section => section.key === 'skills');
+  const listedSkills = specificSkills.filter(item => evidenceLevel({ sections: skillSections }, item.label,
+    catalog.find(term => term.label === item.label)?.aliases || [item.label], positiveTermMatch).credit > 0);
+  const role = roleStructure(resume, signals);
+  const qualification = /\b(?:bachelor|master|doctor|diploma|B\.?Sc|M\.?Sc|B\.?S\.?|M\.?S\.?|B\.?A\.?|B\.?Tech|M\.?Tech|MBA|Ph\.?D)\b/i;
+  const education = resume.profile.entries.filter(entry => entry.kind === 'education' && qualification.test(entry.title));
+  const educationPoints = education.length ? 2 + (education.some(entry => entry.organization) ? 2 : 0) : 0;
+  const uniqueWords = new Set(wordsIn(resume.text).map(word => word.toLowerCase())).size;
+  const distinctLines = unique(resume.text.split(/[\n\f]/).map(line => cleanText(line).replace(/^[•*-]\s*/, '').trim()).filter(Boolean));
+  const distinctTextWords = distinctLines.join(' ').match(/[\p{L}\p{N}][\p{L}\p{N}+#'.-]*/gu)?.length || 0;
+  const corruptCharacters = (resume.extractedText.match(/[�□]/g) || []).length;
+  const corruption = corruptCharacters / Math.max(1, resume.extractedText.length);
+  const extractionProblem = corruption > 0.01 || (metadata.warnings || []).some(warning => /low|could not|failed|damaged/i.test(warning));
+  const readable = distinctTextWords >= 45 && uniqueWords >= 12 ? 8 : distinctTextWords >= 15 && uniqueWords >= 8 ? 4 : 0;
+  const headings = new Set(sections.filter(section => section.key !== 'other' &&
+    wordsIn(section.lines.join(' ')).length >= 3).map(section => section.key)).size;
+  const summary = sections.filter(section => section.key === 'summary').flatMap(section => section.lines).join(' ');
+  const summaryWords = new Set(wordsIn(summary).map(word => word.toLowerCase())).size;
+  const profileContext = wordsIn(summary).length >= 12 && summaryWords >= 8 || signals.detailed.length >= 2;
+  const outcomePoints = Math.min(12, signals.quantified.length * 6 + signals.qualitative.length * 3 + Math.min(2, signals.scope.length));
+  const check = (id, title, points, max, advice, evidence) => ({ id, title, points, max, advice, evidence });
   const categories = [
     { id: 'readability', title: 'ATS readability', icon: 'scan-line', checks: [
-      check('text', 'Readable text', wordCount >= 45 ? 8 : wordCount >= 15 ? 4 : 0, 8,
-        'Export your resume as a text-based PDF or DOCX and confirm the extracted text contains every section.', `${wordCount} words extracted`),
-      check('format', 'Reading order', wordCount < 15 ? 0 : metadata.layoutWarning || metadata.ocrPages ? 2 : 6, 6,
-        'Use a single-column layout with standard text. Review the parsed text for skipped or reordered lines.',
-        metadata.ocrPages ? `OCR used on ${metadata.ocrPages} page(s)` : metadata.layoutWarning || 'No layout issues detected'),
-      check('headings', 'Recognizable headings', Math.min(6, new Set(sections.filter(section => section.key !== 'other' && section.lines.length).map(section => section.key)).size * 2), 6,
-        'Use standard section labels such as Experience, Education, and Skills.'),
+      check('text', 'Readable text', extractionProblem ? Math.min(4, readable) : readable, 8,
+        'Review the extracted text against the resume and fix missing or corrupted characters.',
+        `${wordCount} words extracted, ${distinctTextWords} after repeated lines are removed. ${corruptCharacters} replacement or missing-glyph characters detected.`),
+      check('format', 'Extraction quality', !readable ? 0 : extractionProblem ? 3 : 6, 6,
+        'Resolve the extraction warnings and confirm every section is readable in the extracted text.',
+        extractionProblem ? 'The extraction reported low confidence, a failed page, or damaged text.' :
+          metadata.ocrPages ? `OCR recovered text on ${metadata.ocrPages} page(s). Confirm its accuracy against the original.` :
+          metadata.layoutWarning || 'No extraction quality warnings reported.'),
+      check('headings', 'Recognizable headings', Math.min(6, headings * 2), 6,
+        'Use standard section labels with substantive content, such as Experience, Projects, Education, and Skills.',
+        `${headings} recognized sections contain at least three words of content.`),
     ] },
     { id: 'structure', title: 'Resume structure', icon: 'layout-list', checks: [
-      check('contact', 'Contact details', (contact.name ? 2 : 0) + (contact.email.length ? 4 : 0) + (contact.phone.length ? 2 : 0), 8,
-        'Place your full name, email address, and phone number together near the top of the resume.'),
-      check('experience', 'Experience and dates', (has('experience') ? 5 : 0) + (experienceDates.length ? 4 : 0), 9,
-        'Add an Experience section with role titles, organizations, and dates such as Jan 2023 – Present. Internships count.'),
-      check('education', 'Education section', has('education') ? 4 : 0, 4,
-        'Add an Education section with the institution, qualification, and completion year when applicable.'),
-      check('skills', 'Skills section', has('skills') ? 4 : 0, 4,
-        'Group your relevant skills under a clearly labeled Skills heading.'),
+      check('contact', 'Contact details', (contact.name ? 2 : 0) + (contact.email.length ? 4 : 0) + (contact.phone.length || contact.links.length ? 2 : 0), 8,
+        'Include your name, an email address, and a phone number or professional link.',
+        `Name ${contact.name ? 'found' : 'missing'}, email ${contact.email.length ? 'found' : 'missing'}, additional contact channel ${contact.phone.length || contact.links.length ? 'found' : 'missing'}.`),
+      check('experience', 'Experience or projects', role.points, 9,
+        'For employment, show titles, organizations, and valid dates for each role. Projects should explain the specific work you completed.',
+        role.evidence),
+      check('education', 'Education details', educationPoints, 4,
+        'Include a recognizable qualification and institution in the Education section.',
+        `${education.length} qualifications detected. ${education.filter(entry => entry.organization).length} have an institution.`),
+      check('skills', 'Organized skills', Math.min(4, listedSkills.length * 2), 4,
+        'List specific tools, methods, or competencies under a Skills heading.',
+        `${listedSkills.length} specific skills found in a Skills section.`),
     ] },
     { id: 'impact', title: 'Experience & impact', icon: 'chart-no-axes-column-increasing', checks: [
-      check('accomplishments', 'Accomplishment statements', Math.min(8, statements.length * 2), 8,
-        'Add concise bullets under Experience or Projects that explain what you did and the result.', `${statements.length} statements detected`),
-      check('metrics', 'Measurable impact', Math.min(14, quantifiedStatements.length * 5), 14,
-        'Quantify outcomes you can substantiate, such as time saved, revenue, accuracy, or people served.', quantifiedStatements[0] || 'No measurable outcomes detected'),
-      check('verbs', 'Action verbs', statements.length ? Math.round(8 * actionStatements.length / statements.length) : 0, 8,
-        'Start bullets with accurate action verbs such as Built, Reduced, or Led, then describe the result.',
-        `${actionStatements.length} of ${statements.length} statements start with an action verb`),
+      check('accomplishments', 'Specific work descriptions', Math.min(10, Math.round(signals.detailed.length * 2.5)), 10,
+        'Describe distinct actions, their context, and the work you personally completed.',
+        `${signals.detailed.length} distinct, substantive work descriptions. Numeric variants of the same statement count once.`),
+      check('metrics', 'Outcome evidence', outcomePoints, 12,
+        'Explain what changed as a result of your work. Include measurable outcomes when you can substantiate them.',
+        `${signals.quantified.length} measured changes, ${signals.qualitative.length} qualitative outcomes, ${signals.scope.length} scale or task counts. Scale alone earns at most 2 points.`),
+      check('verbs', 'Clear actions', signals.statements.length ? Math.round(8 * signals.actionable.length / signals.statements.length * Math.min(1, signals.statements.length / 3)) : 0, 8,
+        'Start statements with clear actions and describe your contribution. Add distinct examples where the resume is brief.',
+        `${signals.actionable.length} of ${signals.statements.length} distinct statements start with an action. Full coverage requires at least three examples.`),
     ] },
   ];
   categories.push(keywords.total ? { id: 'keywords', title: keywords.semantic ? 'Job requirement match' : 'Job keyword match', icon: 'target', checks: [
-    check('role-match', keywords.semantic ? 'Job requirement coverage' : 'Role keyword coverage', Math.round(25 * keywords.ratio), 25,
-      keywords.semantic ? 'Use the Job match tab to identify requirements you can support with clearer evidence.' :
-        'Add missing job keywords where they describe your actual experience. Review matches in the Job match tab.',
-      `${keywords.matched.length} of ${keywords.total} detected terms found`),
+    check('role-match', keywords.semantic ? 'Requirement coverage' : 'Keyword coverage', Math.round(15 * keywords.ratio), 15,
+      'Review the missing criteria in Job match and add them where they describe your actual experience.',
+      `${keywords.matched.length} of ${keywords.total} criteria have positive resume evidence. Required criteria carry twice the weight of preferred criteria.`),
+    check('job-evidence', 'Supporting job evidence', Math.round(10 * keywords.evidenceRatio), 10,
+      'Connect relevant skills to specific work or study examples. A bare list or summary earns half the supporting credit.',
+      `${keywords.matched.filter(item => item.credit === 1).length} criteria have supporting context. ${keywords.matched.filter(item => item.credit === 0.5).length} are listed or summarized claims.`),
   ] } : { id: 'content', title: 'Content coverage', icon: 'target', checks: [
-    check('skill-detail', 'Specific skills', Math.min(10, skills.length * 2), 10,
-      'List at least five specific skills you can demonstrate, such as tools, methods, or industry competencies.'),
-    check('profile', 'Professional summary', sections.some(section => section.key === 'summary' && section.lines.join(' ').split(/\s+/).length >= 20) ? 5 : 0, 5,
-      'Add a short summary that names your target role, experience level, and strongest relevant skills.'),
-    check('detail', 'Relevant detail', wordCount >= 150 ? 7 : wordCount >= 85 ? 4 : wordCount >= 45 ? 2 : 0, 7,
-      'Expand brief role descriptions with relevant responsibilities, tools, and accomplishments.'),
-    check('support', 'Supporting evidence', has('projects') || has('certifications') || has('publications') || has('volunteer') || has('awards') || contact.links.length ? 3 : 0, 3,
-      'Include relevant projects, credentials, volunteer experience, awards, or a portfolio link.'),
+    check('skill-detail', 'Specific skills with evidence', Math.min(10, Math.round(skillSupport.reduce((total, item) => total + item.credit * 2, 0))), 10,
+      'Show how you used relevant skills in work, projects, education, or credentials.',
+      `${specificSkills.length} specific skills detected. ${skillSupport.filter(item => item.credit === 1).length} have supporting context.`),
+    check('profile', 'Profile context', profileContext ? 5 : 0, 5,
+      'Use a substantive summary or detailed role and project descriptions to establish your background.',
+      profileContext ? 'The summary or work descriptions provide background context.' : 'A substantive summary or at least two specific work descriptions was not found.'),
+    check('detail', 'Relevant detail', Math.min(7, Math.round(signals.detailed.length * 1.75)), 7,
+      'Add distinct work descriptions with tasks, methods, audiences, and outcomes that matter to your target role.',
+      `${signals.detailed.length} distinct work descriptions. Repeated or unrelated padding earns no detail points.`),
+    check('support', 'Supporting links or credentials', resume.profile.entries.some(entry =>
+      ['project', 'credential', 'publication', 'volunteer', 'award'].includes(entry.kind) && wordsIn(entry.evidence.join(' ')).length >= 4) || contact.links.length ? 3 : 0, 3,
+      'Include relevant projects, credentials, volunteer work, publications, or a professional link.',
+      `${contact.links.length} links and ${resume.profile.entries.filter(entry => ['project', 'credential', 'publication', 'volunteer', 'award'].includes(entry.kind)).length} supporting entries detected.`),
   ] });
   const totals = categories.map(category => ({
     ...category,
@@ -241,5 +327,9 @@ export function scoreResume(resume, job = '', requirements = []) {
   const improvements = totals.flatMap(category => category.checks)
     .filter(item => item.points < item.max)
     .sort((first, second) => (second.max - second.points) - (first.max - first.points));
-  return { score: totals.reduce((total, category) => total + category.points, 0), categories: totals, improvements, keywords };
+  const notes = [];
+  if (metadata.ocrPages || metadata.layoutWarning) notes.push('OCR or layout reconstruction was used. Review the extracted text before relying on the score.');
+  if (job.trim() && !keywords.total) notes.push('No usable job criteria were detected. This score uses general content coverage.');
+  return { score: totals.reduce((total, category) => total + category.points, 0), categories: totals, improvements, keywords,
+    rubricVersion: '2.0', mode: keywords.total ? 'job-specific' : 'general', notes };
 }

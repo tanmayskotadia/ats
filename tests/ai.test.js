@@ -36,7 +36,10 @@ test('grounds fields, discards invented text, and scores weighted semantic match
   assert.equal(result.requirements[1].evidence, '');
   const report = scoreResume(parseResume(input.resume), input.job, result.requirements);
   assert.equal(report.keywords.ratio, 2 / 3);
-  assert.equal(report.categories.find(category => category.id === 'keywords').points, 17);
+  const category = report.categories.find(category => category.id === 'keywords');
+  assert.equal(category.checks.find(check => check.id === 'role-match').points, 10);
+  assert.equal(category.checks.find(check => check.id === 'job-evidence').points, 3);
+  assert.equal(category.points, 13);
 });
 
 test('uses the OpenAI Responses protocol with strict schema and storage disabled', async () => {
