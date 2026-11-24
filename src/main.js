@@ -13,7 +13,6 @@ const icon = name => (iconFiles[`/node_modules/lucide-static/icons/${name}.svg`]
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character],
 );
-const progressColor = { readability: 'purple', structure: 'blue', impact: 'orange', keywords: 'green', content: 'green' };
 let records = [];
 let batchSettings;
 let busy = false;
@@ -28,7 +27,7 @@ function ring(score) {
 }
 
 function categoryRows(categories) {
-  return categories.map(category => `<div class="metric ${progressColor[category.id]}">
+  return categories.map(category => `<div class="metric">
     <span class="metric-icon">${icon(category.icon)}</span>
     <div><div class="metric-label"><span>${escape(category.title)}</span><b>${category.points}<span> / ${category.max}</span></b></div>
     <div class="track" aria-hidden="true"><i style="width:${100 * category.points / category.max}%"></i></div></div>
