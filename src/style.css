@@ -48,10 +48,7 @@ h2 { font-size: 20px; font-weight: 800; letter-spacing: -.55px; }
 }
 .header { border-width: 0 0 1px; box-shadow: 0 1px 0 var(--line); }
 .header-inner { height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.brand { display: inline-flex; align-items: center; gap: 9px; font-family: var(--heading); font-weight: 850; font-size: 26px; letter-spacing: -1.5px; text-decoration: none; }
-.brand-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff; background: var(--accent-dark); box-shadow: inset 0 1px 0 #ffffff40; }
-.brand-icon svg { width: 20px; height: 20px; }
-.brand-dot { color: var(--accent); margin-left: -9px; }
+.brand { font-family: var(--heading); font-weight: 850; font-size: 26px; letter-spacing: -1.5px; text-decoration: none; }
 .quiet { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 650; background: transparent; border: 0; padding: 8px 0; }
 .quiet:hover, .browse:hover { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 4px; }
 .quiet svg { width: 16px; height: 16px; }
@@ -203,7 +200,6 @@ dialog dd { margin: 0; font-weight: 700; white-space: nowrap; }
   .shell { width: calc(100% - 30px); }
   .header-inner { height: 59px; }
   .brand { font-size: 23px; }
-  .brand-icon { width: 30px; height: 30px; }
   .help-button { font-size: 11px; gap: 4px; }
   .hero { margin-top: 15px; border-radius: 20px; }
   .hero-content { padding: 29px 23px; }

@@ -8,6 +8,8 @@ Use **Edit text and rescan** from a report to correct OCR mistakes or try a resu
 
 Requires Node.js 22.13+.
 
+The browser app, workers, API, and scripts use TypeScript. Vite builds the browser bundle, and Node runs the API and scripts directly with native type stripping. `npm run build` checks types before bundling.
+
 ```sh
 npm ci
 npm run dev
@@ -79,6 +81,7 @@ The Node server serves the app and API on one port. Use `HOST=0.0.0.0` for a con
 ## Verify
 
 ```sh
+npm run typecheck
 npm test
 npm run models:download
 npm run build
